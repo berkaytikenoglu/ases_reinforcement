@@ -102,6 +102,7 @@ class Renderer3D:
         self.hud_episode = Text(text='Episode: 1', position=(0.65, 0.30), origin=(0, 0.5), color=color.white, scale=1.2)
         self.hud_spawned = Text(text='Spawned: 0/50', position=(0.65, 0.25), origin=(0, 0.5), color=color.cyan, scale=1.2)
         self.hud_threats = Text(text='Active: 0', position=(0.65, 0.20), origin=(0, 0.5), color=color.orange, scale=1.2)
+        self.hud_hp = Text(text='HEALTH: 3', position=(0.65, 0.15), origin=(0, 0.5), color=color.green, scale=2.0)
         
         # Stats tracking
         self.total_hits = 0
@@ -171,6 +172,16 @@ class Renderer3D:
         self.hud_ammo.text = f'Ammo: {ds.ammo}/{ds.ammo_capacity}'
         self.hud_threats.text = f'Active: {len(self.env.threats)}'
         self.hud_spawned.text = f'Spawned: {self.env.threats_spawned}/{Params.THREATS_PER_EPISODE}'
+        
+        # Update HP
+        hp = max(0, self.env.agent_health)
+        self.hud_hp.text = f'HEALTH: {hp}'
+        if hp >= 3:
+            self.hud_hp.color = color.green
+        elif hp == 2:
+            self.hud_hp.color = color.yellow
+        else:
+            self.hud_hp.color = color.red
         
         # 1. Update Defense System
         # Map Cannon position (it's static usually but logic has x,y)

@@ -1,6 +1,8 @@
 
 import tkinter as tk
 from tkinter import ttk, messagebox
+from tkinter.scrolledtext import ScrolledText
+import threading
 import json
 import os
 import sys
@@ -14,7 +16,26 @@ class TrainingApp:
     def __init__(self, root):
         self.root = root
         self.root.title("ASES Training Control Panel")
-        self.root.geometry("500x600")
+        self.root.geometry("750x850")
+        
+        self.is_training = False
+        self.current_process = None # Track subprocess
+        self.PARAMS_DESC = {
+            "GRAVITY": "Yerçekimi (m/s²)",
+            "DT": "Zaman Adımı (s)",
+            "AMMO_CAPACITY": "Mermi Kapasitesi",
+            "RELOAD_TIME": "Yenileme (frame)",
+            "PROJECTILE_SPEED": "Mermi Hızı",
+            "THREAT_SPEED_MIN": "Min Tehdit Hızı",
+            "THREAT_SPEED_MAX": "Max Tehdit Hızı",
+            "SPAWN_INTERVAL": "Tehdit Sıklığı (düşük=sık)",
+            "MAX_WIND_FORCE": "Max Rüzgar Gücü",
+            "LEARNING_RATE": "Öğrenme Hızı (AI)",
+            "THREATS_PER_EPISODE": "Görev Hedefi (Max Tehdit)",
+            "MAX_CONCURRENT_THREATS": "Max Anlık Tehdit",
+            "MAX_EPISODES": "Eğitim Süresi (Ep)",
+            "AGENT_HEALTH": "Ajan Can Hakkı"
+        }
         
         self.params = {}
         self.load_params_from_class()
@@ -31,9 +52,12 @@ class TrainingApp:
             "PROJECTILE_SPEED": Params.PROJECTILE_SPEED,
             "THREAT_SPEED_MIN": Params.THREAT_SPEED_MIN,
             "THREAT_SPEED_MAX": Params.THREAT_SPEED_MAX,
-            "SPAWN_RATE": Params.SPAWN_RATE,
+            "SPAWN_INTERVAL": Params.SPAWN_INTERVAL,
             "MAX_WIND_FORCE": Params.MAX_WIND_FORCE,
-            "LEARNING_RATE": Params.LEARNING_RATE
+            "LEARNING_RATE": Params.LEARNING_RATE,
+            "LEARNING_RATE": Params.LEARNING_RATE,
+            "MAX_EPISODES": getattr(Params, 'MAX_EPISODES', 1000),
+            "AGENT_HEALTH": getattr(Params, 'AGENT_HEALTH', 3)
         }
         
     def create_widgets(self):
@@ -49,11 +73,25 @@ class TrainingApp:
         param_frame.pack(fill=tk.BOTH, expand=True)
         
         row = 0
+        row = 0
         for key, value in self.params.items():
             ttk.Label(param_frame, text=key).grid(row=row, column=0, sticky=tk.W, pady=5, padx=5)
-            entry = ttk.Entry(param_frame)
-            entry.insert(0, str(value))
+            
+            if key == "MAX_EPISODES":
+                # Use Combobox for Episodes
+                entry = ttk.Combobox(param_frame, values=["10", "50", "100", "500", "1000", "2000", "5000", "10000"])
+                entry.set(str(value))
+            else:
+                # Standard Entry
+                entry = ttk.Entry(param_frame)
+                entry.insert(0, str(value))
+                
             entry.grid(row=row, column=1, sticky=tk.EW, pady=5, padx=5)
+            
+            # Description Label
+            desc = self.PARAMS_DESC.get(key, "")
+            ttk.Label(param_frame, text=desc, foreground="gray", font=("Arial", 8, "italic")).grid(row=row, column=2, sticky=tk.W, pady=5, padx=5)
+            
             self.entries[key] = entry
             row += 1
             
@@ -64,10 +102,61 @@ class TrainingApp:
         self.use_3d_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(btn_frame, text="Use 3D Visualization", variable=self.use_3d_var).pack(side=tk.TOP, pady=5)
         
-        ttk.Button(btn_frame, text="Save Parameters", command=self.save_parameters).pack(side=tk.LEFT, padx=5, expand=True)
-        ttk.Button(btn_frame, text="Start Training", command=self.start_training).pack(side=tk.LEFT, padx=5, expand=True)
+        self.start_btn = ttk.Button(btn_frame, text="Start Training", command=self.start_training)
+        self.start_btn.pack(side=tk.LEFT, padx=5, expand=True)
+
+        # --- Model Management ---
+        model_frame = ttk.LabelFrame(main_frame, text="Model Management", padding="5")
+        model_frame.pack(fill=tk.X, pady=10)
         
-    def save_parameters(self):
+        # Model Selection
+        select_frame = ttk.Frame(model_frame)
+        select_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(select_frame, text="Select Model:").pack(side=tk.LEFT, padx=5)
+        
+        self.model_var = tk.StringVar()
+        self.model_combo = ttk.Combobox(select_frame, textvariable=self.model_var, state="readonly", width=40)
+        self.model_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        ttk.Button(select_frame, text="↻", width=3, command=self.refresh_models).pack(side=tk.LEFT, padx=2)
+        self.refresh_models() # Initial load
+        
+        # Action Buttons
+        action_frame = ttk.Frame(model_frame)
+        action_frame.pack(fill=tk.X, pady=5)
+        
+        # Test Visualization Mode
+        self.test_viz_mode = tk.StringVar(value="3D")
+        
+        viz_frame = ttk.Frame(action_frame)
+        viz_frame.pack(side=tk.LEFT, padx=5)
+        ttk.Label(viz_frame, text="View:").pack(side=tk.LEFT)
+        ttk.Radiobutton(viz_frame, text="2D", variable=self.test_viz_mode, value="2D").pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(viz_frame, text="3D", variable=self.test_viz_mode, value="3D").pack(side=tk.LEFT, padx=2)
+        
+        self.test_btn = ttk.Button(action_frame, text="Test Agent", command=self.test_agent)
+        self.test_btn.pack(side=tk.LEFT, padx=5, expand=True)
+        # ----------------------
+        
+
+        
+        # Console Output Area
+        log_frame = ttk.LabelFrame(main_frame, text="Training Log", padding="5")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        self.log_area = ScrolledText(log_frame, state='disabled', height=15)
+        self.log_area.pack(fill=tk.BOTH, expand=True)
+        self.log_area.configure(font='TkFixedFont')
+
+    def log(self, message):
+        self.log_area.config(state='normal')
+        self.log_area.insert(tk.END, message + "\n")
+        self.log_area.see(tk.END)
+        self.log_area.config(state='disabled')
+
+        
+    def save_parameters(self, show_message=True):
         # Read values from entries and update config/parameters.py
         # This is a bit "hacky" text replacement or we could use AST, 
         # but for simplicity let's regenerate the file content based on the inputs + default structure.
@@ -101,13 +190,18 @@ class Params:
     
     # Savunma Sistemi (Ajan)
     AMMO_CAPACITY = {new_params.get("AMMO_CAPACITY", 10)}
+    AGENT_HEALTH = {new_params.get("AGENT_HEALTH", 3)}
     RELOAD_TIME = {new_params.get("RELOAD_TIME", 50)}
     PROJECTILE_SPEED = {new_params.get("PROJECTILE_SPEED", 20.0)}
     
     # Tehdit (Meteor/Hedef)
     THREAT_SPEED_MIN = {new_params.get("THREAT_SPEED_MIN", 5.0)}
     THREAT_SPEED_MAX = {new_params.get("THREAT_SPEED_MAX", 10.0)}
-    SPAWN_RATE = {new_params.get("SPAWN_RATE", 100)}
+    
+    # Episode Kuralları
+    THREATS_PER_EPISODE = {new_params.get("THREATS_PER_EPISODE", 30)}      # Her episode'da toplam tehdit sayısı
+    MAX_CONCURRENT_THREATS = 3    # Aynı anda maksimum tehdit sayısı
+    SPAWN_INTERVAL = {new_params.get("SPAWN_INTERVAL", 30)}
     
     # Rüzgar (Stokastik)
     WIND_CHANGE_INTERVAL = 200
@@ -115,6 +209,7 @@ class Params:
     
     # Eğitim / RL
     LEARNING_RATE = {new_params.get("LEARNING_RATE", 0.0003)}
+    MAX_EPISODES = {new_params.get("MAX_EPISODES", 1000)}
     GAMMA = 0.99
     EPSILON_START = 1.0
     EPSILON_END = 0.01
@@ -123,26 +218,133 @@ class Params:
             with open(os.path.join(os.path.dirname(__file__), '../config/parameters.py'), 'w', encoding='utf-8') as f:
                 f.write(content)
                 
-            messagebox.showinfo("Success", "Parameters saved successfully!")
+            if show_message:
+                messagebox.showinfo("Success", "Parameters saved successfully!")
             
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def start_training(self):
-        self.save_parameters() # Save before starting
+
+    def refresh_models(self):
+        models_dir = os.path.join(os.path.dirname(__file__), '../models')
+        models = []
+        if os.path.exists(models_dir):
+            # List .pth files sorted by modification time (newest first)
+            files = [os.path.join(models_dir, f) for f in os.listdir(models_dir) if f.endswith('.pth')]
+            files.sort(key=os.path.getmtime, reverse=True)
+            models = [os.path.basename(f) for f in files]
+            
+        self.model_combo['values'] = models
+        if models:
+            self.model_combo.current(0)
+            
+    def test_agent(self):
+        model = self.model_var.get()
+        if not model:
+            messagebox.showwarning("Warning", "Please select a model first.")
+            return
+        self.start_training(mode="test", model_name=model)
+
+    def stop_training(self):
+        if self.current_process:
+            self.log("Stopping training...")
+            self.current_process.terminate()
+            # self.current_process = None # Will be handled in finally block of run_process
+        return
+
+    def start_training(self, mode="train", model_name=None):
+        if self.is_training:
+            # If already training, this button acts as STOP
+            self.stop_training()
+            return
+            
+        if mode == "train":
+            self.save_parameters(show_message=False) # Save before training
+        
+        # UI Updates
+        self.is_training = True
+        
+        # Change Start Button to Stop Button
+        self.start_btn.config(text="Stop Training", command=self.stop_training)
+        
+        # Disable other buttons
+        self.test_btn.config(state='disabled')
         
         # Launch trainer.py
         try:
             trainer_path = os.path.join(os.path.dirname(__file__), '../src/controller/trainer.py')
             
             cmd = [sys.executable, trainer_path]
-            if self.use_3d_var.get():
-                cmd.append("--3d")
             
-            # Use Popen to run in background
-            subprocess.Popen(cmd, cwd=os.path.dirname(trainer_path))
+            if mode == "test":
+                cmd.append("--test")
+                # Use local option from Model Management
+                if self.test_viz_mode.get() == "3D":
+                     cmd.append("--3d")
+            else:
+                # Training mode - use global option
+                if self.use_3d_var.get():
+                    cmd.append("--3d")
+                else:
+                    cmd.append("--fast")
+                    
+            # Add Episode Count
+            try:
+                episodes = int(self.entries["MAX_EPISODES"].get())
+                cmd.extend(["--episodes", str(episodes)])
+            except:
+                pass # Use default if invalid
+            
+            if model_name:
+                cmd.extend(["--model", model_name])
+
+            
+            try:
+                threading.Thread(target=self.run_process, args=(cmd,), daemon=True).start()
+            except Exception as e:
+                self.is_training = False
+                self.start_btn.config(state='normal', text="Start Training", command=self.start_training) # Reset if launch fails
+                raise e
+            
         except Exception as e:
             messagebox.showerror("Error", f"Failed to start training: {e}")
+
+    def run_process(self, cmd):
+        self.log("-" * 50)
+        self.log(f"Starting process: {' '.join(cmd)}")
+        self.log("-" * 50)
+        
+        try:
+            # Popen with pipe redirection
+            self.current_process = subprocess.Popen(
+                cmd, 
+                cwd=os.path.dirname(cmd[1]), # Use trainer.py dir as cwd
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            ) 
+            
+            # Read output line by line
+            for line in self.current_process.stdout:
+                # Schedule log update in main thread
+                self.root.after(0, self.log, line.strip())
+                
+            self.current_process.wait()
+            self.root.after(0, self.log, f"\nProcess finished with exit code {self.current_process.returncode}")
+            
+        except Exception as e:
+            self.root.after(0, self.log, f"Error: {str(e)}")
+            
+        finally:
+             self.current_process = None
+             self.root.after(0, self.reset_buttons)
+             self.is_training = False
+
+    def reset_buttons(self):
+        self.start_btn.config(state='normal', text="Start Training", command=self.start_training)
+        self.test_btn.config(state='normal')
 
 if __name__ == "__main__":
     root = tk.Tk()

@@ -19,7 +19,7 @@ class DefenseEnv(gym.Env):
         super(DefenseEnv, self).__init__()
         
         # Action Space: [Angle (-1 to 1), Fire Trigger (0 to 1)]
-        self.action_space = spaces.Box(low=np.array([-1.0, 0.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        self.action_space = spaces.Box(low=np.array([-1.0, 0.0], dtype=np.float32), high=np.array([1.0, 1.0], dtype=np.float32), dtype=np.float32)
         
         # Observation Space: [CoolDown, Wind, Ammo_Ratio, Threat1_X, Threat1_Y, Threat1_DX, Threat1_DY, ...]
         # Tracking up to 3 closest threats
@@ -52,6 +52,12 @@ class DefenseEnv(gym.Env):
         self.threats_spawned = 0
         self.threats_destroyed = 0
         self.threats_missed = 0
+        self.threats_spawned = 0
+        self.threats_destroyed = 0
+        self.threats_missed = 0
+        self.threats_hit_agent = 0 # Track direct hits on agent
+        self.agent_health = Params.AGENT_HEALTH # Reset Health
+        self.shots_fired = 0
         self.spawn_timer = 0
         
         return self._get_obs(), {}
@@ -122,6 +128,7 @@ class DefenseEnv(gym.Env):
                 reward += Rewards.WASTED_AMMO_PENALTY
             elif self.defense_system.fire(angle_rad, Params.PROJECTILE_SPEED):
                 # Successful fire - apply base miss penalty (offset by hit reward if hits)
+                self.shots_fired += 1
                 reward += Rewards.MISS_PENALTY
                 
                 # Aim bonus if pointed at closest threat
@@ -156,10 +163,42 @@ class DefenseEnv(gym.Env):
         self.threats_missed += misses
         
         if misses > 0:
-            # Threat reached ground - episode ends!
-            reward += Rewards.GROUND_HIT_PENALTY
-            terminated = True
-            info['reason'] = 'threat_reached_ground'
+            # Threat reached ground - Apply CUMULATIVE PENALTY
+            # Penalty increases for each missed threat: 500, 750, 1125...
+            # We iterate because multiple threats might hit ground in same frame (rare but possible)
+            for _ in range(misses):
+                # Using 'threats_missed - misses + 1 + i' to track cumulative count correctly
+                # (Since we already added misses to self.threats_missed above)
+                pass 
+                
+            # Applying penalty based on current total misses
+            # Using exponential growth: Base * (Multiplier ^ (MissCount - 1))
+            current_penalty = Rewards.GROUND_HIT_PENALTY * (Rewards.GROUND_HIT_MULTIPLIER ** (self.threats_missed - 1))
+            
+            # Cap the penalty to avoid floating point explosion if needed, but let's keep it raw for now
+            reward += current_penalty
+            
+            # NO GAME OVER - Agent must suffer and learn
+            # terminated = True 
+            info['reason'] = 'threat_reached_ground_penalty'
+            
+        # Check Agent Hits
+        agent_hits = self._check_agent_collisions()
+        self.threats_hit_agent += agent_hits
+        
+        if agent_hits > 0:
+            # Huge Penalty for getting hit directly
+            reward += Rewards.GROUND_HIT_PENALTY * 2 * agent_hits
+            
+            # Decrease Health
+            self.agent_health -= agent_hits
+            
+            # Check Death
+            if self.agent_health <= 0:
+                reward += Rewards.DEATH_PENALTY
+                terminated = True
+                info['reason'] = 'agent_died'
+
         
         # Check Win Condition - All threats spawned and destroyed
         if self.threats_spawned >= Params.THREATS_PER_EPISODE and len(self.threats) == 0:
@@ -180,6 +219,12 @@ class DefenseEnv(gym.Env):
         info['hits'] = self.threats_destroyed
         info['misses'] = self.threats_missed
         info['spawned'] = self.threats_spawned
+        info['misses'] = self.threats_missed
+        info['spawned'] = self.threats_spawned
+        info['shots'] = self.shots_fired
+        info['shots'] = self.shots_fired
+        info['agent_hits'] = self.threats_hit_agent
+        info['health'] = max(0, self.agent_health)
             
         return self._get_obs(), reward, terminated, truncated, info
 
@@ -241,6 +286,20 @@ class DefenseEnv(gym.Env):
                         self.threats.remove(t)
                         hits += 1
                         break
+        return hits
+
+    def _check_agent_collisions(self):
+        """Check if any threat hit the defense system directly"""
+        hits = 0
+        # Defense System Hitbox (Approximate)
+        agent_radius = 20.0
+        
+        for t in self.threats[:]:
+            dist = math.hypot(t.x - self.defense_system.x, t.y - self.defense_system.y)
+            if dist < (t.radius + agent_radius):
+                # AGENT HIT!
+                self.threats.remove(t)
+                hits += 1
         return hits
 
     def _check_threats_reached_base(self):

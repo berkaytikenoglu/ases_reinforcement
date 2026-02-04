@@ -20,7 +20,7 @@ class Projectile(Entity):
         dx = speed * math.cos(angle_rad)
         dy = -speed * math.sin(angle_rad) # Negative dy because y=0 is top
         super().__init__(x, y, dx, dy)
-        self.radius = 3
+        self.radius = 10 # Increased from 3 to help learning
 
     def update(self, dt, wind_force, gravity=9.8):
         # Apply wind force to x velocity (minimal effect on fast projectiles)
@@ -63,7 +63,7 @@ class Threat(Entity):
         dy = speed 
         
         super().__init__(x, y, dx, dy)
-        self.radius = 5
+        self.radius = 15 # Increased from 5 to help learning
 
     def update(self, dt, wind_force, gravity=9.8):
         # Wind affects threats too, depending on their aerodynamics/weight

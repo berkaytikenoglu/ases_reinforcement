@@ -8,6 +8,7 @@ from datetime import datetime
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.stdout.reconfigure(line_buffering=True) # Force instant flushing for UI console
 
 from src.model.environment import DefenseEnv
 from src.view.renderer import Renderer
@@ -51,7 +52,7 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             print("DEBUG: Initializing 2D Renderer (Fallback or Requested)")
             renderer = Renderer(env)
     else:
-        print("🚀 FAST TRAINING MODE - No visualization")
+        print("FAST TRAINING MODE - No visualization")
     
     # PPO Hyperparameters
     update_timestep = 2000
@@ -73,23 +74,26 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
     
     # Load existing model if exists
     if os.path.exists(model_path):
-        print(f"✅ Loading model from {model_path}")
+        print(f"Loading model from {model_path}")
         agent.load(model_path)
     else:
         if test_mode:
-            print(f"❌ Model not found: {model_path}")
+            print(f"Model not found: {model_path}")
             print("Available models:")
             for m in list_models():
                 print(f"  - {m}")
             return
-        print("🆕 No existing model found, starting fresh.")
+        print("No existing model found, starting fresh.")
     
     time_step = 0
     total_rewards = []
-    best_reward = float('-inf')
+    time_step = 0
+    total_rewards = []
+    best_reward = float('-inf')     # Best single episode reward (for stats)
+    best_avg_reward = float('-inf') # Best average reward (for saving best model)
     start_time = time.time()
     
-    mode_str = "🧪 TEST MODE" if test_mode else "🎯 TRAINING MODE"
+    mode_str = "TEST MODE" if test_mode else "TRAINING MODE"
     print(f"\n{'='*50}")
     print(f"{mode_str} - {max_episodes} episodes")
     print(f"Model: {model_path}")
@@ -111,7 +115,7 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             state_tensor = torch.FloatTensor(state)
             
             # Execute action
-            next_state, reward, terminated, truncated, _ = env.step(action)
+            next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
             # Only save to memory and train if not in test mode
@@ -146,32 +150,54 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             best_reward = current_ep_reward
         
         # Progress reporting
-        if i_episode % 10 == 0 or i_episode == 1:
+        # Progress reporting
+        if i_episode % 1 == 0:
             elapsed = time.time() - start_time
             avg_reward = np.mean(total_rewards[-100:]) if len(total_rewards) >= 100 else np.mean(total_rewards)
             eps_per_sec = i_episode / elapsed if elapsed > 0 else 0
-            print(f"Episode {i_episode:4d}/{max_episodes} | Reward: {current_ep_reward:8.2f} | Avg(100): {avg_reward:8.2f} | Best: {best_reward:8.2f} | Speed: {eps_per_sec:.1f} ep/s")
+            
+            # Hit stats
+            hits = info.get('hits', 0)
+            shots = info.get('shots', 0)
+            dmg = info.get('agent_hits', 0)
+            spawned = info.get('spawned', 0)
+            hit_rate = (hits / spawned * 100) if spawned > 0 else 0.0
+            
+            # Result Status
+            reason = info.get('reason', '')
+            hp = info.get('health', 0)
+            
+            result = "SUCCESS"
+            if reason == 'agent_died':
+                result = "DIED"
+            elif reason == 'threat_reached_ground_penalty' or hits < spawned:
+                result = "FAILED"
+            
+            print(f"Episode {i_episode:4d}/{max_episodes} | Reward: {current_ep_reward:8.2f} | Avg(100): {avg_reward:8.2f} | Hits: {hits:2d}/{spawned:2d} ({hit_rate:5.1f}%) | HP: {hp} | Dmg: {dmg:2d} | Result: {result}")
+            
+            # Save BEST model (based on Avg Reward stability, not single crazy episode)
+            if not test_mode and avg_reward > best_avg_reward and i_episode >= 50:
+                best_avg_reward = avg_reward
+                best_model_path = model_path.replace('.pth', '_best.pth')
+                agent.save(best_model_path)
+                print(f" >>> New Best Model! Avg: {best_avg_reward:.2f} Saved to {os.path.basename(best_model_path)}")
         
         # Save during training
-        if not test_mode and i_episode % 50 == 0:
+        if not test_mode and i_episode % 200 == 0:
             agent.save(model_path)
-            print(f"💾 Model saved to {model_path}")
+            print(f"Model saved to {model_path}")
     
     # Final save (training only)
     if not test_mode:
         agent.save(model_path)
-        # Also save a timestamped backup
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = os.path.join(MODELS_DIR, f"agent_{timestamp}.pth")
-        agent.save(backup_path)
-        print(f"💾 Backup saved to {backup_path}")
+        print(f"Final model saved to {model_path}")
     
     elapsed = time.time() - start_time
     print(f"\n{'='*50}")
-    print(f"✅ {'Test' if test_mode else 'Training'} Complete!")
-    print(f"📊 Final Average Reward (last 100): {np.mean(total_rewards[-100:]):.2f}")
-    print(f"🏆 Best Reward: {best_reward:.2f}")
-    print(f"⏱️ Total Time: {elapsed/60:.1f} minutes")
+    print(f"DONE! {'Test' if test_mode else 'Training'} Complete!")
+    print(f"Final Average Reward (last 100): {np.mean(total_rewards[-100:]):.2f}")
+    print(f"Best Reward: {best_reward:.2f}")
+    print(f"Total Time: {elapsed/60:.1f} minutes")
     print(f"{'='*50}")
             
     if render and renderer:
@@ -191,7 +217,7 @@ if __name__ == '__main__':
     
     # List models and exit
     if args.list:
-        print("\n📁 Available Models:")
+        print("\nAvailable Models:")
         print(f"Location: {MODELS_DIR}")
         print("-" * 40)
         models = list_models()
@@ -200,7 +226,7 @@ if __name__ == '__main__':
                 filepath = os.path.join(MODELS_DIR, m)
                 size = os.path.getsize(filepath) / 1024
                 mtime = datetime.fromtimestamp(os.path.getmtime(filepath)).strftime("%Y-%m-%d %H:%M")
-                print(f"  📦 {m} ({size:.1f} KB) - {mtime}")
+                print(f"   {m} ({size:.1f} KB) - {mtime}")
         else:
             print("  No models found. Train one with: python trainer.py --fast --episodes 1000")
         print()
