@@ -99,8 +99,18 @@ class TrainingApp:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=20)
         
+        # Options row
+        options_frame = ttk.Frame(btn_frame)
+        options_frame.pack(side=tk.TOP, pady=5)
+        
         self.use_3d_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(btn_frame, text="Use 3D Visualization", variable=self.use_3d_var).pack(side=tk.TOP, pady=5)
+        ttk.Checkbutton(options_frame, text="Use 3D Visualization", variable=self.use_3d_var).pack(side=tk.LEFT, padx=10)
+        
+        # CPU/GPU Selection
+        ttk.Label(options_frame, text="Device:").pack(side=tk.LEFT, padx=5)
+        self.device_var = tk.StringVar(value="CPU")
+        ttk.Radiobutton(options_frame, text="CPU", variable=self.device_var, value="CPU").pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(options_frame, text="GPU", variable=self.device_var, value="GPU").pack(side=tk.LEFT, padx=2)
         
         self.start_btn = ttk.Button(btn_frame, text="Start Training", command=self.start_training)
         self.start_btn.pack(side=tk.LEFT, padx=5, expand=True)
@@ -287,6 +297,10 @@ class Params:
                     cmd.append("--3d")
                 else:
                     cmd.append("--fast")
+            
+            # CPU/GPU Selection
+            if self.device_var.get() == "CPU":
+                cmd.append("--cpu")
                     
             # Add Episode Count
             try:

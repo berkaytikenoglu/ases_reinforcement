@@ -10,19 +10,19 @@ class Params:
     DT = 0.1
     
     # Savunma Sistemi (Ajan)
-    AMMO_CAPACITY = 100
-    AGENT_HEALTH = 3
+    AMMO_CAPACITY = 60
+    AGENT_HEALTH = 6
     RELOAD_TIME = 5
     PROJECTILE_SPEED = 100.0
     
     # Tehdit (Meteor/Hedef)
-    THREAT_SPEED_MIN = 40.0
-    THREAT_SPEED_MAX = 60.0
+    THREAT_SPEED_MIN = 15.0       # Daha yavaş (kolay hedef)
+    THREAT_SPEED_MAX = 25.0       # Daha yavaş
     
     # Episode Kuralları
-    THREATS_PER_EPISODE = 30      # Her episode'da toplam tehdit sayısı
-    MAX_CONCURRENT_THREATS = 3    # Aynı anda maksimum tehdit sayısı
-    SPAWN_INTERVAL = 40
+    THREATS_PER_EPISODE = 20      # Hard Mode: Gerçek sınav!
+    MAX_CONCURRENT_THREATS = 3    # Biraz daha kaos (2->3)
+    SPAWN_INTERVAL = 70           # Daha seyrek tehdit
     
     # Rüzgar (Stokastik)
     WIND_CHANGE_INTERVAL = 200

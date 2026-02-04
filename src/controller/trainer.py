@@ -20,6 +20,7 @@ except ImportError as e:
 
 from src.agent.agent import Agent, Memory
 from config.parameters import Params
+from src.view.training_visualizer import get_visualizer, start_visualizer, close_visualizer
 
 # Models directory
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../../models')
@@ -99,6 +100,11 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
     print(f"Model: {model_path}")
     print(f"{'='*50}\n")
     
+    # Start training visualizer (only for training mode, not test)
+    visualizer = None
+    if not test_mode:
+        visualizer = start_visualizer()
+    
     for i_episode in range(1, max_episodes+1):
         state, _ = env.reset()
         current_ep_reward = 0
@@ -161,6 +167,8 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             shots = info.get('shots', 0)
             dmg = info.get('agent_hits', 0)
             spawned = info.get('spawned', 0)
+            ammo_left = info.get('ammo', 0)
+            ammo_used = Params.AMMO_CAPACITY - ammo_left
             hit_rate = (hits / spawned * 100) if spawned > 0 else 0.0
             
             # Result Status
@@ -173,7 +181,13 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             elif reason == 'threat_reached_ground_penalty' or hits < spawned:
                 result = "FAILED"
             
-            print(f"Episode {i_episode:4d}/{max_episodes} | Reward: {current_ep_reward:8.2f} | Avg(100): {avg_reward:8.2f} | Hits: {hits:2d}/{spawned:2d} ({hit_rate:5.1f}%) | HP: {hp} | Dmg: {dmg:2d} | Result: {result}")
+            print(f"Episode {i_episode:4d}/{max_episodes} | Reward: {current_ep_reward:8.2f} | Avg(100): {avg_reward:8.2f} | Hits: {hits:2d}/{spawned:2d} ({hit_rate:5.1f}%) | Miss: {shots-hits:2d} | HP: {hp} | Result: {result}")
+            
+            # Update training visualizer graphs
+            if visualizer:
+                visualizer.add_episode(i_episode, current_ep_reward, avg_reward, hits, spawned, ammo_used, result)
+                if i_episode % 5 == 0:  # Update plots every 5 episodes for performance
+                    visualizer.update_plots()
             
             # Save BEST model (based on Avg Reward stability, not single crazy episode)
             if not test_mode and avg_reward > best_avg_reward and i_episode >= 50:
@@ -183,8 +197,14 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
                 print(f" >>> New Best Model! Avg: {best_avg_reward:.2f} Saved to {os.path.basename(best_model_path)}")
         
         # Save during training
-        if not test_mode and i_episode % 200 == 0:
+        if not test_mode and i_episode % 100 == 0:
             agent.save(model_path)
+            if visualizer:
+                # Save with model name as prefix
+                base_name = os.path.basename(model_path).replace('.pth', '')
+                viz_path = os.path.join(os.path.dirname(model_path), f"{base_name}_training_metrics.png")
+                visualizer.save_figure(viz_path)
+                # print(f" > Metrics saved to {base_name}_training_metrics.png")
             print(f"Model saved to {model_path}")
     
     # Final save (training only)
@@ -202,6 +222,13 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             
     if render and renderer:
         renderer.close()
+    
+    # Save and close visualizer
+    if visualizer:
+        graph_path = model_path.replace('.pth', '_training_metrics.png')
+        visualizer.save_figure(graph_path)
+        visualizer.close()
+        
     env.close()
 
 if __name__ == '__main__':
@@ -213,7 +240,14 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default=None, help='Model name to load/save (without .pth)')
     parser.add_argument('--test', action='store_true', help='Test mode (no training, just run agent)')
     parser.add_argument('--list', action='store_true', help='List available models')
+    parser.add_argument('--cpu', action='store_true', help='Force CPU mode (disable GPU)')
     args = parser.parse_args()
+    
+    # Set device globally before training
+    if args.cpu:
+        import torch
+        torch.cuda.is_available = lambda: False
+        print("[CPU] Forced CPU mode")
     
     # List models and exit
     if args.list:

@@ -77,9 +77,32 @@ class Agent:
         
         self.MseLoss = nn.MSELoss()
         
-        self.device = torch.device('cpu') # force cpu for simplicity on windows unless cuda checked
+        # GPU Support - use CUDA if available (can be forced to CPU)
+        self.device = torch.device('cpu')  # Default
+        if torch.cuda.is_available():
+            self.device = torch.device('cuda')
+            print(f"[GPU] CUDA ENABLED: {torch.cuda.get_device_name(0)}")
+        else:
+            print("[CPU] GPU not available, using CPU")
+        
         self.policy.to(self.device)
         self.policy_old.to(self.device)
+        self.policy.action_var = self.policy.action_var.to(self.device)
+        self.policy_old.action_var = self.policy_old.action_var.to(self.device)
+    
+    def set_device(self, use_gpu=True):
+        """Switch between CPU and GPU"""
+        if use_gpu and torch.cuda.is_available():
+            self.device = torch.device('cuda')
+            print(f"[GPU] Switched to CUDA: {torch.cuda.get_device_name(0)}")
+        else:
+            self.device = torch.device('cpu')
+            print("[CPU] Using CPU mode")
+        
+        self.policy.to(self.device)
+        self.policy_old.to(self.device)
+        self.policy.action_var = self.policy.action_var.to(self.device)
+        self.policy_old.action_var = self.policy_old.action_var.to(self.device)
 
     def select_action(self, state):
         with torch.no_grad():

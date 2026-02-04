@@ -21,9 +21,9 @@ class DefenseEnv(gym.Env):
         # Action Space: [Angle (-1 to 1), Fire Trigger (0 to 1)]
         self.action_space = spaces.Box(low=np.array([-1.0, 0.0], dtype=np.float32), high=np.array([1.0, 1.0], dtype=np.float32), dtype=np.float32)
         
-        # Observation Space: [CoolDown, Wind, Ammo_Ratio, Threat1_X, Threat1_Y, Threat1_DX, Threat1_DY, ...]
+        # Observation Space: [CoolDown, Wind, Ammo_Ratio, Threat1_X, Threat1_Y, Threat1_DX, Threat1_DY, Threat1_IdealAngleInput, ...]
         # Tracking up to 3 closest threats
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(18,), dtype=np.float32)
         
         self.width = Params.SCREEN_WIDTH
         self.height = Params.SCREEN_HEIGHT
@@ -59,6 +59,7 @@ class DefenseEnv(gym.Env):
         self.agent_health = Params.AGENT_HEALTH # Reset Health
         self.shots_fired = 0
         self.spawn_timer = 0
+        self.hit_streak = 0  # Track consecutive hits for combo bonus
         
         return self._get_obs(), {}
     
@@ -78,18 +79,35 @@ class DefenseEnv(gym.Env):
             self.defense_system.ammo / Params.AMMO_CAPACITY,
         ]
         
-        # Add up to 3 closest threats (4 values each: x, y, dx, dy)
+        # Add up to 3 closest threats (5 values each: x, y, dx, dy, ideal_angle_input)
         for i in range(3):
             if i < len(threats_by_dist):
                 t = threats_by_dist[i][1]
+                
+                # Calculate Ideal Angle Input for this threat
+                # Desired Angle in degrees
+                dx = t.x - self.defense_system.x
+                dy = -(t.y - self.defense_system.y) # Upwards is positive for atan2
+                desired_rad = math.atan2(dy, dx)
+                desired_deg = math.degrees(desired_rad)
+                
+                # Convert to Input Space: angle_rad = math.radians(90 - angle_input * 60)
+                # angle_deg = 90 - input * 60
+                # input = (90 - angle_deg) / 60
+                ideal_input = (90 - desired_deg) / 60.0
+                
+                # Clamp to valid range
+                ideal_input = max(-1.0, min(1.0, ideal_input))
+                
                 obs.extend([
                     t.x / self.width,
                     t.y / self.height,
                     t.dx / 100.0,
-                    t.dy / 100.0
+                    t.dy / 100.0,
+                    ideal_input # GUIDANCE SIGNAL!
                 ])
             else:
-                obs.extend([0.0, 0.0, 0.0, 0.0])
+                obs.extend([0.0, 0.0, 0.0, 0.0, 0.0])
         
         return np.array(obs, dtype=np.float32)
 
@@ -127,22 +145,45 @@ class DefenseEnv(gym.Env):
                 # WASTED AMMO - firing when no threats exist
                 reward += Rewards.WASTED_AMMO_PENALTY
             elif self.defense_system.fire(angle_rad, Params.PROJECTILE_SPEED):
-                # Successful fire - apply base miss penalty (offset by hit reward if hits)
+                # Successful fire - apply DYNAMIC miss penalty based on distance
                 self.shots_fired += 1
-                reward += Rewards.MISS_PENALTY
+                reward += Rewards.FIRE_PENALTY  # Cost of firing (don't spray!)
                 
-                # Aim bonus if pointed at closest threat
+                # Dynamic Penalty Logic
+                miss_penalty = Rewards.MISS_PENALTY_LONG_RANGE # Default: Assume long range (be careful!)
+                if closest_threat:
+                     dist = math.hypot(closest_threat.x - self.defense_system.x, closest_threat.y - self.defense_system.y)
+                     if dist < 350:
+                         # Close range: Panic fire allowed!
+                         miss_penalty = Rewards.MISS_PENALTY_CLOSE_RANGE
+                
+                reward += miss_penalty
+                
+                # Check aim quality
                 if closest_threat:
                     target_angle = math.atan2(
                         -(closest_threat.y - self.defense_system.y),
                         closest_threat.x - self.defense_system.x
                     )
                     angle_diff = abs(angle_rad - target_angle)
+                    
                     if angle_diff < Rewards.AIM_ANGLE_THRESHOLD:
+                        # Good aim! Give bonus
                         reward += Rewards.AIM_BONUS
+                    elif angle_diff > Rewards.BAD_AIM_THRESHOLD:
+                        # Bad aim! Extra penalty for shooting without proper aim
+                        reward += Rewards.BAD_AIM_PENALTY
             else:
                 # Cooldown violation
                 reward += Rewards.COOLDOWN_VIOLATION
+                
+            # Bonus for engaging when threats exist
+            if len(self.threats) > 0:
+                reward += Rewards.ENGAGE_BONUS
+        else:
+            # Not firing - HEAVY PENALTY if threats exist (don't wait, attack NOW!)
+            if len(self.threats) > 0 and closest_threat:
+                pass # IDLE penalty removed - focus on hit rewards
         
         # Risky angle penalty
         if abs(angle_input) > 0.9:
@@ -158,9 +199,25 @@ class DefenseEnv(gym.Env):
         self.threats_destroyed += hits
         reward += hits * Rewards.HIT_REWARD
         
+        # Add early/late engagement bonus/penalty
+        if hasattr(self, 'last_engagement_reward'):
+            reward += self.last_engagement_reward
+        
+        # Accuracy streak bonus (combo!)
+        if hits > 0:
+            self.hit_streak += hits
+            if self.hit_streak >= 2:
+                # Combo bonus! More consecutive hits = bigger bonus
+                streak_bonus = Rewards.ACCURACY_STREAK_BONUS * (self.hit_streak - 1)
+                reward += streak_bonus
+        
         # Check Threats Reaching Ground (GAME OVER condition)
         misses = self._check_threats_reached_base()
         self.threats_missed += misses
+        
+        # Reset streak on miss
+        if misses > 0:
+            self.hit_streak = 0  # Reset combo on failure
         
         if misses > 0:
             # Threat reached ground - Apply CUMULATIVE PENALTY
@@ -205,6 +262,12 @@ class DefenseEnv(gym.Env):
             if self.threats_destroyed == self.threats_spawned:
                 # PERFECT WIN - all threats destroyed!
                 reward += Rewards.EPISODE_WIN_BONUS
+                
+                # AMMO EFFICIENCY BONUS (Only on win!)
+                ammo_left = self.defense_system.ammo
+                ammo_bonus = ammo_left * Rewards.AMMO_EFFICIENCY_BONUS
+                reward += ammo_bonus
+                
                 terminated = True
                 info['reason'] = 'perfect_win'
             else:
@@ -219,6 +282,7 @@ class DefenseEnv(gym.Env):
         info['hits'] = self.threats_destroyed
         info['misses'] = self.threats_missed
         info['spawned'] = self.threats_spawned
+        info['ammo'] = self.defense_system.ammo  # Fix for visualizer!
         info['misses'] = self.threats_missed
         info['spawned'] = self.threats_spawned
         info['shots'] = self.shots_fired
@@ -235,10 +299,10 @@ class DefenseEnv(gym.Env):
         for proj in self.defense_system.projectiles:
             proj.update(dt, self.wind_force, Params.GRAVITY)
             
-        # Cleanup projectiles out of bounds
+        # Cleanup projectiles out of bounds (extended for upward shots)
         self.defense_system.projectiles = [
             p for p in self.defense_system.projectiles 
-            if 0 <= p.x <= self.width and 0 <= p.y <= self.height
+            if -500 <= p.x <= self.width + 500 and -500 <= p.y <= self.height + 100
         ]
                                            
         for t in self.threats:
@@ -273,8 +337,10 @@ class DefenseEnv(gym.Env):
             self.wind_force = max(-Params.MAX_WIND_FORCE, min(Params.MAX_WIND_FORCE, self.wind_force))
 
     def _check_collisions(self):
-        """Check projectile-threat collisions, return number of hits"""
+        """Check projectile-threat collisions, return number of hits and engagement rewards"""
         hits = 0
+        engagement_reward = 0
+        
         for proj in self.defense_system.projectiles[:]:
             for t in self.threats[:]:
                 dist = math.hypot(proj.x - t.x, proj.y - t.y)
@@ -283,9 +349,27 @@ class DefenseEnv(gym.Env):
                     if proj in self.defense_system.projectiles:
                         self.defense_system.projectiles.remove(proj)
                     if t in self.threats:
+                        # Calculate distance to agent for strategy mode
+                        dist_to_agent = math.hypot(t.x - self.defense_system.x, t.y - self.defense_system.y)
+                        
+                        # ===== HETEROJEN STRATEJİ MODU =====
+                        if dist_to_agent > Rewards.AREA_DEFENSE_DISTANCE:
+                            # AREA DEFENSE MODE: Yüksek irtifa - parçalayıcı alan savunması
+                            engagement_reward += Rewards.AREA_DEFENSE_HIT_BONUS
+                            engagement_reward += Rewards.STRATEGY_MATCH_BONUS  # Doğru mod!
+                        elif dist_to_agent < Rewards.RAPID_FIRE_DISTANCE:
+                            # RAPID FIRE MODE: Kritik yakınlık - odaklı seri atış
+                            engagement_reward += Rewards.RAPID_FIRE_PRECISION_BONUS
+                            engagement_reward += Rewards.STRATEGY_MATCH_BONUS  # Doğru mod!
+                        else:
+                            # ORTA MESAFE: Normal engagement bonus
+                            engagement_reward += Rewards.EARLY_HIT_BONUS
+                        
                         self.threats.remove(t)
                         hits += 1
                         break
+        
+        self.last_engagement_reward = engagement_reward
         return hits
 
     def _check_agent_collisions(self):
