@@ -2,15 +2,15 @@
 class Rewards:
     """Ödül ve Ceza Değerleri - RL Eğitimi için (Heterojen Strateji)"""
     
-    # ===== POZİTİF ÖDÜLLER (DENGELİ SNIPER) =====
-    HIT_REWARD = 2500.0             # Vuruş değerli olmalı ki denesin (500->2500)
+    # ===== POZİTİF ÖDÜLLER (ULTIMATE SNIPER) =====
+    HIT_REWARD = 3000.0             # Vuruş çok değerli (+3000)
     EARLY_HIT_BONUS = 500.0         
-    EPISODE_WIN_BONUS = 50000.0     # Büyük hedef sabit
+    EPISODE_WIN_BONUS = 100000.0    # KAZANMAK HER ŞEYDİR! (+100k)
     AIM_BONUS = 50.0                
     SURVIVAL_BONUS = 0.1            
-    ACCURACY_STREAK_BONUS = 100.0    
-    ENGAGE_BONUS = 5.0              
-    AMMO_EFFICIENCY_BONUS = 200.0   
+    ACCURACY_STREAK_BONUS = 200.0    
+    ENGAGE_BONUS = 10.0              
+    AMMO_EFFICIENCY_BONUS = 500.0   # Mermi başına +500 (Tasarruf çok önemli)
     
     # ===== HETEROJEN STRATEJİ ÖDÜLLER =====
     AREA_DEFENSE_HIT_BONUS = 500.0      # Yüksek irtifa vuruş bonusu (DEVASA!)
@@ -22,17 +22,17 @@ class Rewards:
     RAPID_FIRE_DISTANCE = 200       # Piksel - kritik yakınlık modu (odaklı seri atış)
     
     # ===== NEGATİF CEZALAR (AĞIR!) =====
+    # ===== DİNAMİK CEZALAR (ULTIMATE SCALE) =====
     # ===== DİNAMİK CEZALAR (MESAFEYE GÖRE) =====
-    # ===== DİNAMİK CEZALAR (MESAFEYE GÖRE) =====
-    MISS_PENALTY_LONG_RANGE = -500.0  # Tolere edilebilir hata (-2000 -> -500)
-    MISS_PENALTY_CLOSE_RANGE = -200.0 
+    MISS_PENALTY_LONG_RANGE = -2000.0  # Iska çok pahalı (-2000)
+    MISS_PENALTY_CLOSE_RANGE = -1000.0 
     
-    FIRE_PENALTY = -25.0            # Makul ateş maliyeti (-100 -> -25)
+    FIRE_PENALTY = -100.0           # Ateş maliyeti yüksek (-100)
     
-    MISS_PENALTY = -50.0            # (Varsayılan - kullanılmayacak)
+    MISS_PENALTY = -50.0            
     LATE_ENGAGEMENT_PENALTY = -500.0 
-    GROUND_HIT_PENALTY = -5000.0    # ASLA GEÇİT VERME! (-2500 -> -5000)
-    GROUND_HIT_MULTIPLIER = 3.0     # Hata affedilmez
+    GROUND_HIT_PENALTY = -10000.0   # KAÇIRMAK YOK! (-10,000)
+    GROUND_HIT_MULTIPLIER = 2.0     
     DEATH_PENALTY = -3000.0         # Ajan ölürse (Çok ağır)
     WASTED_AMMO_PENALTY = -200.0    # Tehdit yokken ateş (Yasak!)
     COOLDOWN_VIOLATION = -50.0      # Cooldown'da ateş (Sabırsızlık cezası)
