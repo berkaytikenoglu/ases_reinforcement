@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import subprocess
+import random
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -57,7 +58,12 @@ class TrainingApp:
             "LEARNING_RATE": Params.LEARNING_RATE,
             "LEARNING_RATE": Params.LEARNING_RATE,
             "MAX_EPISODES": getattr(Params, 'MAX_EPISODES', 1000),
-            "AGENT_HEALTH": getattr(Params, 'AGENT_HEALTH', 3)
+            "AGENT_HEALTH": getattr(Params, 'AGENT_HEALTH', 3),
+            
+            # PPO Batch
+            "ROLLOUT_STEPS": getattr(Params, 'ROLLOUT_STEPS', 2048),
+            "MINIBATCH_SIZE": getattr(Params, 'MINIBATCH_SIZE', 64),
+            "PPO_EPOCHS": getattr(Params, 'PPO_EPOCHS', 10)
         }
         
     def create_widgets(self):
@@ -217,13 +223,24 @@ class Params:
     WIND_CHANGE_INTERVAL = 200
     MAX_WIND_FORCE = {new_params.get("MAX_WIND_FORCE", 2.0)}
     
-    # Eğitim / RL
+    # Eğitim / RL (PPO Hyperparameters)
     LEARNING_RATE = {new_params.get("LEARNING_RATE", 0.0003)}
     MAX_EPISODES = {new_params.get("MAX_EPISODES", 1000)}
     GAMMA = 0.99
-    EPSILON_START = 1.0
-    EPSILON_END = 0.01
-    EPSILON_DECAY = 0.995
+    
+    # Advanced PPO
+    LAMBDA = 0.95
+    CLIP_RANGE = 0.2
+    ENTROPY_COEF = 0.01
+    VALUE_COEF = 0.5
+    
+    ADVANTAGE_NORMALIZE = True
+    LR_SCHEDULE = "linear"
+    
+    # BATCH & ROLLOUT
+    ROLLOUT_STEPS = {new_params.get("ROLLOUT_STEPS", 2048)}
+    MINIBATCH_SIZE = {new_params.get("MINIBATCH_SIZE", 64)}
+    PPO_EPOCHS = {new_params.get("PPO_EPOCHS", 10)}
 """
             with open(os.path.join(os.path.dirname(__file__), '../config/parameters.py'), 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -237,12 +254,20 @@ class Params:
 
     def refresh_models(self):
         models_dir = os.path.join(os.path.dirname(__file__), '../models')
-        models = []
+        items = []
         if os.path.exists(models_dir):
-            # List .pth files sorted by modification time (newest first)
-            files = [os.path.join(models_dir, f) for f in os.listdir(models_dir) if f.endswith('.pth')]
-            files.sort(key=os.path.getmtime, reverse=True)
-            models = [os.path.basename(f) for f in files]
+            for f in os.listdir(models_dir):
+                path = os.path.join(models_dir, f)
+                if os.path.isdir(path):
+                    # Folder based model
+                    items.append({'name': f, 'mtime': os.path.getmtime(path)})
+                elif f.endswith('.pth'):
+                    # Legacy file based model
+                    items.append({'name': f.replace('.pth', ''), 'mtime': os.path.getmtime(path)})
+            
+            # Sort by mtime descending
+            items.sort(key=lambda x: x['mtime'], reverse=True)
+            models = [item['name'] for item in items]
             
         self.model_combo['values'] = models
         if models:
@@ -270,6 +295,8 @@ class Params:
             
         if mode == "train":
             self.save_parameters(show_message=False) # Save before training
+            if not model_name:
+                model_name = self.model_var.get().strip()
         
         # UI Updates
         self.is_training = True
@@ -290,11 +317,11 @@ class Params:
                 cmd.append("--test")
                 # Use local option from Model Management
                 if self.test_viz_mode.get() == "3D":
-                     cmd.append("--3d")
+                     cmd.append("--viz3d")
             else:
                 # Training mode - use global option
                 if self.use_3d_var.get():
-                    cmd.append("--3d")
+                    cmd.append("--viz3d")
                 else:
                     cmd.append("--fast")
             
@@ -309,6 +336,27 @@ class Params:
             except:
                 pass # Use default if invalid
             
+            if not model_name:
+            # Auto-generate COOL name with ordering
+                cool_names = ["Titan", "Viper", "Shadow", "Hunter", "Eagle", "Raptor", "Ghost", "Spectre", "Predator", "Cobra", "Falcon", "Raven", "Onyx", "Pulse", "Storm", "Blitz", "Nova", "Apex"]
+                
+                # Find next order ID
+                next_id = 1
+                models_dir = os.path.join(os.path.dirname(__file__), '../models')
+                if os.path.exists(models_dir):
+                    for f in os.listdir(models_dir):
+                        if "_" in f and f.split("_")[0].isdigit():
+                            try:
+                                fid = int(f.split("_")[0])
+                                if fid >= next_id:
+                                    next_id = fid + 1
+                            except:
+                                pass
+                
+                chosen_name = random.choice(cool_names)
+                model_name = f"{next_id:03d}_{chosen_name}"
+                self.log(f"Auto-generated Agent Name: {model_name}")
+
             if model_name:
                 cmd.extend(["--model", model_name])
 
@@ -329,10 +377,14 @@ class Params:
         self.log("-" * 50)
         
         try:
+            # Determine Project Root properly
+            # ui.py is in training_app/, so root is one level up
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            
             # Popen with pipe redirection
             self.current_process = subprocess.Popen(
                 cmd, 
-                cwd=os.path.dirname(cmd[1]), # Use trainer.py dir as cwd
+                cwd=project_root, # Use project root as CWD (Fixes asset loading issues)
                 stdout=subprocess.PIPE, 
                 stderr=subprocess.STDOUT,
                 text=True,

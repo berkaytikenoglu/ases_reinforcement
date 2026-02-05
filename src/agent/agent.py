@@ -4,6 +4,12 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Normal, Categorical
 import numpy as np
+import sys
+import os
+
+# Add project root to path for imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from config.parameters import Params
 
 class ActorCritic(nn.Module):
     def __init__(self, input_dim, action_dim_continuous, action_std_init=0.6):
@@ -112,50 +118,104 @@ class Agent:
         return action.cpu().numpy().flatten(), action_logprob.cpu().numpy().flatten()
     
     def update(self, memory):
-        # Convert list to tensor
-        rewards = []
-        discounted_reward = 0
-        for reward, is_terminal in zip(reversed(memory.rewards), reversed(memory.is_terminals)):
-            if is_terminal:
-                discounted_reward = 0
-            discounted_reward = reward + (self.gamma * discounted_reward)
-            rewards.insert(0, discounted_reward)
-            
-        # Normalizing the rewards
-        rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+        # Monte Carlo estimate of returns => REPLACED WITH GAE
         
+        # Get old states
         old_states = torch.squeeze(torch.stack(memory.states, dim=0)).detach().to(self.device)
         old_actions = torch.squeeze(torch.stack(memory.actions, dim=0)).detach().to(self.device)
         old_logprobs = torch.squeeze(torch.stack(memory.logprobs, dim=0)).detach().to(self.device)
         
+        # Get Values for GAE
+        with torch.no_grad():
+            values = self.policy.critic(old_states).squeeze()
+            
+        # GAE Calculation
+        rewards = []
+        gae = 0
+        advantages = []
+        
+        # Reverse iteration
+        for i in reversed(range(len(memory.rewards))):
+            if memory.is_terminals[i]:
+                next_val = 0
+                gae = 0
+            else:
+                if i < len(memory.rewards) - 1:
+                    next_val = values[i + 1]
+                else:
+                    next_val = values[i] # Approximation for last step
+            
+            delta = memory.rewards[i] + Params.GAMMA * next_val - values[i]
+            gae = delta + Params.GAMMA * Params.LAMBDA * gae
+            advantages.insert(0, gae)
+            
+        advantages = torch.tensor(advantages, dtype=torch.float32).to(self.device)
+        
+        # Returns = Advantage + Value
+        returns = advantages + values
+        
+        # Advantage Normalization
+        if getattr(Params, 'ADVANTAGE_NORMALIZE', True):
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-7)
+        
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
-            # Evaluating old actions and values
-            logprobs, state_values, dist_entropy = self.policy.evaluate(old_states, old_actions)
+            # Mini-batch processing
+            batch_size = getattr(Params, 'MINIBATCH_SIZE', 64)
+            data_size = old_states.size(0)
             
-            # match state_values tensor dimensions with rewards tensor
-            state_values = torch.squeeze(state_values)
+            # Generate random indices
+            indices = np.arange(data_size)
+            np.random.shuffle(indices)
             
-            # Finding the ratio (pi_theta / pi_theta__old)
-            ratios = torch.exp(logprobs - old_logprobs.detach())
+            for start_idx in range(0, data_size, batch_size):
+                end_idx = min(start_idx + batch_size, data_size)
+                batch_indices = indices[start_idx:end_idx]
+                
+                # Get mini-batch
+                mb_states = old_states[batch_indices]
+                mb_actions = old_actions[batch_indices]
+                mb_logprobs = old_logprobs[batch_indices]
+                mb_advantages = advantages[batch_indices]
+                mb_returns = returns[batch_indices]
 
-            # Finding Surrogate Loss
-            advantages = rewards - state_values.detach()   
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
+                # Evaluating old actions and values
+                logprobs, state_values, dist_entropy = self.policy.evaluate(mb_states, mb_actions)
+                
+                # match state_values tensor dimensions with rewards tensor
+                state_values = torch.squeeze(state_values)
+                
+                # Finding the ratio (pi_theta / pi_theta__old)
+                ratios = torch.exp(logprobs - mb_logprobs.detach())
 
-            # final loss of clipped objective PPO
-            loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, rewards) - 0.01 * dist_entropy
-            
-            # take gradient step
-            self.optimizer.zero_grad()
-            loss.mean().backward()
-            self.optimizer.step()
+                # Finding Surrogate Loss
+                surr1 = ratios * mb_advantages
+                surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * mb_advantages
+
+                # Final loss: Policy Loss + Value Loss + Entropy Loss
+                loss = -torch.min(surr1, surr2) + \
+                       Params.VALUE_COEF * self.MseLoss(state_values, mb_returns) - \
+                       Params.ENTROPY_COEF * dist_entropy
+                
+                # take gradient step
+                self.optimizer.zero_grad()
+                loss.mean().backward()
+                self.optimizer.step()
             
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
 
+    def decay_lr(self, current_ep, max_ep):
+        """Linear learning rate decay"""
+        if getattr(Params, 'LR_SCHEDULE', 'linear') == 'linear':
+            # Linear decay from Initial LR to 0 (or small value)
+            frac = 1.0 - (current_ep / max_ep)
+            lr = Params.LEARNING_RATE * frac
+            lr = max(lr, 1e-7) # Min safety
+            
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = lr
+                
     def save(self, checkpoint_path):
         torch.save(self.policy_old.state_dict(), checkpoint_path)
    

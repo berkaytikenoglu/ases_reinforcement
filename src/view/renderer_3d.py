@@ -84,6 +84,17 @@ class Renderer3D:
         self.cannon_base = Entity(model='cube', color=color.dark_gray, scale=(2, 2, 2), position=(0, 1.5, 0))
         self.cannon_barrel = Entity(parent=self.cannon_base, model='cube', color=color.gray, scale=(0.5, 4, 0.5), position=(0, 0, 0), origin_y=-0.5)
         
+        # FOV Cone (Analysis Tool - 3D)
+        self.fov_cone = Entity(
+            parent=self.cannon_barrel,
+            model='cone',
+            color=color.rgba(0, 255, 100, 40),
+            scale=(math.tan(math.radians(Params.VISUAL_FOV_ANGLE/2)) * 10, 10, math.tan(math.radians(Params.VISUAL_FOV_ANGLE/2)) * 10),
+            position=(0, 1, 0), # At the end of barrel
+            origin_y=-0.5,
+            rotation_x=0
+        )
+        
         # Entities Cache
         self.threat_entities = {} # Map object logic ID -> Ursina Entity
         self.projectile_entities = {}
@@ -171,7 +182,12 @@ class Renderer3D:
         ds = self.env.defense_system
         self.hud_ammo.text = f'Ammo: {ds.ammo}/{ds.ammo_capacity}'
         self.hud_threats.text = f'Active: {len(self.env.threats)}'
-        self.hud_spawned.text = f'Spawned: {self.env.threats_spawned}/{Params.THREATS_PER_EPISODE}'
+        
+        # Dynamic target threats based on phase
+        target_threats = Params.PHASE1_THREATS_PER_EPISODE if self.env.curriculum_phase == 1 else \
+                         (1 if self.env.curriculum_phase == 2 else Params.THREATS_PER_EPISODE)
+                         
+        self.hud_spawned.text = f'Spawned: {self.env.threats_spawned}/{target_threats}'
         
         # Update HP
         hp = max(0, self.env.agent_health)
@@ -188,9 +204,13 @@ class Renderer3D:
         cx, cy, cz = self._map_coords(ds.x, ds.y)
         self.cannon_base.position = (cx, 0.5, cz)
         
-        # Cannon Rotation? 
-        # We don't have exact angle stored in DefenseSystem state easily unless we track last shot.
-        # But we can assume it aims at target or just visualizes cooldown.
+        # Rotate Cannon Barrel based on Agent's Angle
+        # Agent angle: 0 (right), pi/2 (up). 
+        # Ursina Z-rotation: 0 is Up, -90 is Right.
+        # Conversion: Ursina_Z = - (ds.angle_degrees - 90)
+        angle_deg = math.degrees(ds.angle)
+        self.cannon_barrel.rotation_z = - (angle_deg - 90)
+            
         if ds.cooldown_timer > 0:
             self.cannon_barrel.color = color.red
         else:
