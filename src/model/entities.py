@@ -81,6 +81,7 @@ class DefenseSystem:
         self.ammo_capacity = ammo_capacity
         self.ammo = ammo_capacity 
         self.projectiles = []
+        self.angle = math.pi / 2 # Default: Pointing Up (90 degrees)
 
     def update(self, dt):
         if self.cooldown_timer > 0:

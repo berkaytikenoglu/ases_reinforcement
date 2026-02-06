@@ -41,8 +41,10 @@ def list_models():
                 models.append(f.replace('.pth', ''))
     return sorted(models)
 
-def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test_mode=False):
-    env = DefenseEnv(curriculum_phase=1) # PHASE 1: AIM ONLY (Curriculum Learning)
+def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test_mode=False, starting_phase=None):
+    # Determine initial phase: Override > Default(1)
+    init_phase = starting_phase if starting_phase is not None else 1
+    env = DefenseEnv(curriculum_phase=init_phase) 
     
     state_dim = 15 # SMART OBSERVATION SIZE
     action_dim = env.action_space.shape[0]
@@ -326,6 +328,7 @@ if __name__ == '__main__':
     parser.add_argument('--test', action='store_true', help='Test mode (no training, just run agent)')
     parser.add_argument('--list', action='store_true', help='List available models')
     parser.add_argument('--cpu', action='store_true', help='Force CPU mode (disable GPU)')
+    parser.add_argument('--phase', type=int, default=None, help='Override starting phase (1-3) for testing')
     args = parser.parse_args()
     
     # Set device globally before training
@@ -363,5 +366,6 @@ if __name__ == '__main__':
         render_3d=args.viz3d, 
         max_episodes=args.episodes,
         model_name=args.model,
-        test_mode=args.test
+        test_mode=args.test,
+        starting_phase=args.phase
     )

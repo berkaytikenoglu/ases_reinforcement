@@ -151,6 +151,14 @@ class TrainingApp:
         ttk.Radiobutton(viz_frame, text="2D", variable=self.test_viz_mode, value="2D").pack(side=tk.LEFT, padx=2)
         ttk.Radiobutton(viz_frame, text="3D", variable=self.test_viz_mode, value="3D").pack(side=tk.LEFT, padx=2)
         
+        # Phase Selection (User Request)
+        phase_frame = ttk.Frame(action_frame)
+        phase_frame.pack(side=tk.LEFT, padx=5)
+        ttk.Label(phase_frame, text="Phase:").pack(side=tk.LEFT)
+        self.phase_var = tk.StringVar(value="Auto")
+        phase_combo = ttk.Combobox(phase_frame, textvariable=self.phase_var, values=["Auto", "Phase 1", "Phase 2", "Phase 3"], width=10, state="readonly")
+        phase_combo.pack(side=tk.LEFT, padx=2)
+        
         self.test_btn = ttk.Button(action_frame, text="Test Agent", command=self.test_agent)
         self.test_btn.pack(side=tk.LEFT, padx=5, expand=True)
         # ----------------------
@@ -318,6 +326,12 @@ class Params:
                 # Use local option from Model Management
                 if self.test_viz_mode.get() == "3D":
                      cmd.append("--viz3d")
+                
+                # Phase Override
+                phase_sel = self.phase_var.get()
+                if "Phase 1" in phase_sel: cmd.extend(["--phase", "1"])
+                elif "Phase 2" in phase_sel: cmd.extend(["--phase", "2"])
+                elif "Phase 3" in phase_sel: cmd.extend(["--phase", "3"])
             else:
                 # Training mode - use global option
                 if self.use_3d_var.get():

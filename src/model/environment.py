@@ -74,6 +74,9 @@ class DefenseEnv(gym.Env):
         self.spawn_timer = 100 # Instant spawn logic
         self.hit_streak = 0
         
+        # Anti-Jitter: Reset previous angle to current (fresh start)
+        self.prev_angle = self.defense_system.angle
+        
         return self._get_obs(), {}
     
     def _calculate_ideal_angle(self, target):
@@ -182,23 +185,30 @@ class DefenseEnv(gym.Env):
             has_target = obs[0]
             raw_aim_error = abs(obs[2] / 5.0)  # Raw radians error
             
-            # --- STRICT DISCIPLINE REWARD (User Request) ---
+            # --- STRICT ANTI-JITTER & LOCK-ON REWARDS ---
             
             if has_target > 0.5:
-                # 1. TRACKING DISCIPLINE
-                # Punishment for NOT locking on. Ideally aim_error should be 0.
-                reward -= raw_aim_error * 2.0 
+                # 1. TRACKING MODE
+                # Big Stick: Punishment for Aim Error
+                reward -= raw_aim_error * 5.0 
                 
-                # Bonus for being LOCKED ON (The only way to get validation)
+                # Big Carrot: Massive Bonus for locking on
                 if raw_aim_error < 0.1: # approx 6 degrees
-                    reward += 1.0
+                    reward += 10.0
             else:
-                # 2. STABILITY PENALTY
-                # If no target, changing angle randomly is bad. Punishment for high action magnitude.
-                # action[0] controls target angle. We want to discourage rapid changes.
-                # Assuming 'angle_input' (action[0]) is effectively velocity/change in this context
-                action_mag = abs(float(action[0]))
-                reward -= action_mag * 0.5
+                # 2. IDLE MODE (ANTI-JITTER)
+                # True Jitter Penalty: Punish CHANGE in angle, not just position
+                # We want the agent to stay still when nothing is happening.
+                current_angle_deg = math.degrees(self.defense_system.angle)
+                prev_angle_deg = math.degrees(self.prev_angle) if hasattr(self, 'prev_angle') else current_angle_deg
+                
+                delta_angle = abs(current_angle_deg - prev_angle_deg)
+                
+                if delta_angle > 1.0: # Ignore tiny micro-movements
+                     reward -= delta_angle * 1.0 # Heavy penalty for shaking
+                     
+            # Store current angle for next step jitter check
+            self.prev_angle = self.defense_system.angle
                 
             # Prevent firing in Phase 1
             fire_trigger = 0.0
@@ -287,7 +297,12 @@ class DefenseEnv(gym.Env):
                     info['reason'] = 'agent_died'
 
         # Win Condition (Phase 1 & 3)
-        target_threats = Params.PHASE1_THREATS_PER_EPISODE if self.curriculum_phase == 1 else Params.THREATS_PER_EPISODE
+        if self.curriculum_phase == 1:
+            target_threats = Params.PHASE1_THREATS_PER_EPISODE 
+        elif self.curriculum_phase == 2:
+            target_threats = 1 # ONE SHOT = ONE THREAT
+        else:
+            target_threats = Params.THREATS_PER_EPISODE
         
         if self.curriculum_phase != 2 and self.threats_spawned >= target_threats and len(self.threats) == 0:
              terminated = True

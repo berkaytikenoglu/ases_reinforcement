@@ -31,6 +31,7 @@ class TrainingVisualizer:
         self.rewards = []
         self.avg_rewards = []
         self.hits = []
+        self.misses = []  # NEW: Missed threats
         self.spawned = []
         self.hit_rates = []
         self.ammo_used = []
@@ -120,36 +121,8 @@ class TrainingVisualizer:
             bbox=dict(boxstyle='round,pad=0.4', facecolor='#0d1117', edgecolor='#00ff88', alpha=0.9, linewidth=1.5)
         )
 
-    def add_episode(self, episode, reward, avg_reward, hits, spawned, ammo_used, result):
-        """Add data for a completed episode"""
-        with self.lock:
-            self.episodes.append(episode)
-            self.rewards.append(reward)
-            self.avg_rewards.append(avg_reward)
-            self.hits.append(hits)
-            self.spawned.append(spawned)
-            self.ammo_used.append(ammo_used)
-            self.results.append(result)
-            
-            # Track Deaths
-            is_died = 1 if "DIED" in result else 0
-            if len(self.deaths) > 0:
-                self.deaths.append(self.deaths[-1] + is_died)
-            else:
-                self.deaths.append(is_died)
-                
-            # Track Fails
-            is_failed = 1 if "FAILED" in result else 0
-            if len(self.fails) > 0:
-                self.fails.append(self.fails[-1] + is_failed)
-            else:
-                self.fails.append(is_failed)
-            
-            # ... existing stats code ...
+        # DUPLICATE REMOVED
         
-        plt.tight_layout()
-        plt.show(block=False)
-        plt.pause(0.1)
         
     def add_episode(self, episode, reward, avg_reward, hits, spawned, ammo_used, result):
         """Add data for a completed episode"""
@@ -159,6 +132,7 @@ class TrainingVisualizer:
             self.avg_rewards.append(avg_reward)
             self.hits.append(hits)
             self.spawned.append(spawned)
+            self.misses.append(spawned - hits) # Calculate misses
             self.ammo_used.append(ammo_used)
             self.results.append(result)
             
@@ -190,6 +164,7 @@ class TrainingVisualizer:
                 self.rewards = self.rewards[-self.max_history:]
                 self.avg_rewards = self.avg_rewards[-self.max_history:]
                 self.hits = self.hits[-self.max_history:]
+                self.misses = self.misses[-self.max_history:]
                 self.spawned = self.spawned[-self.max_history:]
                 self.hit_rates = self.hit_rates[-self.max_history:]
                 self.ammo_used = self.ammo_used[-self.max_history:]
@@ -233,7 +208,8 @@ class TrainingVisualizer:
 
                 # 4. Hits vs Spawned
                 self.lines['hits'], = self.axes[1, 0].plot([], [], 'g-', label='Vurulan')
-                self.lines['spawned'], = self.axes[1, 0].plot([], [], 'w--', label='Üretilen')
+                self.lines['missed'], = self.axes[1, 0].plot([], [], 'r--', alpha=0.6, label='Kaçan')
+                self.lines['spawned'], = self.axes[1, 0].plot([], [], 'w:', alpha=0.3, label='Toplam')
                 self.axes[1, 0].set_title('İsabet Sayısı', color='#ff6b6b')
                 self.axes[1, 0].legend(loc='upper left', fontsize=8)
                 
@@ -242,6 +218,7 @@ class TrainingVisualizer:
                 self.axes[1, 1].set_title('Mühimmat Kullanımı', color='#ffd93d')
                 self.axes[1, 1].set_xlabel('Bölüm')
                 self.axes[1, 1].set_ylabel('Kullanılan Mermi')
+                self.axes[1, 1].set_ylim(bottom=0) # USER REQUEST: Fix negative axis
                 
                 # 6. Survival Rate (USER REQUEST: Hayatta Kalma Oranı)
                 self.lines['survival'], = self.axes[1, 2].plot([], [], '#00ff00', linewidth=2)
@@ -259,6 +236,7 @@ class TrainingVisualizer:
                 self.lines['failed'].set_data(eps, self.fail_rates)
             
             self.lines['hits'].set_data(eps, self.hits)
+            self.lines['missed'].set_data(eps, self.misses)
             self.lines['spawned'].set_data(eps, self.spawned)
             self.lines['ammo'].set_data(eps, self.ammo_used)
             

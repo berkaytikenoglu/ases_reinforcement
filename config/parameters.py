@@ -23,13 +23,13 @@ class Params:
     # Phase 1 (Curriculum): Slower threats for easier tracking
     PHASE1_THREAT_SPEED_MIN = 10.0   # SLOW: Easy to track
     PHASE1_THREAT_SPEED_MAX = 15.0   # SLOW: Easy to track
-    PHASE1_THREATS_PER_EPISODE = 3   # ULTRA FAST PHASE 1: 3 threats = even faster episodes
-    PHASE1_SPAWN_INTERVAL = 10       # FAST PHASE 1: 2x spawn rate
+    PHASE1_THREATS_PER_EPISODE = 2   # USER REQUEST: 2 threats for Phase 1
+    PHASE1_SPAWN_INTERVAL = 60       # SLOW SPAWN (1 sec): More time to stabilize (Anti-Jitter Training)
     
     # Episode Kuralları
     THREATS_PER_EPISODE = 10     # Normal: 10 tehdit/episode
     MAX_CONCURRENT_THREATS = 1   # Teke tek
-    SPAWN_INTERVAL = 20          # Normal: 20 frame aralık
+    SPAWN_INTERVAL = 60          # Normal: 60 frame aralık (User Request: More waiting)
     
     # Rüzgar (Stokastik)
     WIND_CHANGE_INTERVAL = 200
