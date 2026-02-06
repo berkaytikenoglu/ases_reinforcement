@@ -45,8 +45,14 @@ class Rewards:
     BAD_AIM_PENALTY = -500.0        # CEZA HAFİFLETİLDİ (-2000 -> -500) - Denemekten korkma!
     TIME_STEP_PENALTY = -0.05       # Zaman cezası (hafif)
     
+    # ===== IFF (IDENTIFICATION FRIEND OR FOE) =====
+    FRIENDLY_FIRE_PENALTY = -20000.0  # DOST ATEŞİ! (Çok ağır ceza - asla yapma!)
+    ENEMY_HIT_BONUS = 3000.0          # Düşman vurma bonusu (IFF doğru karar)
+    FRIENDLY_PASS_BONUS = 200.0       # Dostu vurmadan geçirme bonusu
+    
     # ===== GUIDANCE (Hassas Nişan) =====
     AIM_ANGLE_THRESHOLD = 0.15      # Radyan - Bonus için çok hassas nişan (0.25 -> 0.15)
     BAD_AIM_THRESHOLD = 0.40        # TOLERANS GENİŞLETİLDİ (0.3 -> 0.4) - Biraz hata payı tanı.
     EARLY_ENGAGEMENT_DISTANCE = 600 # Piksel - kapsam genişletildi (450->600)
     LATE_ENGAGEMENT_DISTANCE = 200  # Piksel - geç angajman (yakın = ceza)
+

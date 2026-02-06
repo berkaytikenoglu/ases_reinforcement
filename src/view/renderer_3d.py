@@ -230,7 +230,6 @@ class Renderer3D:
                 explosion_pos = t_entity.position
                 
                 # Create explosion for visual feedback
-                # We show explosion for all removed threats (hits look like explosions)
                 if explosion_pos.y > 5:  # If still in air, likely a hit
                     self._create_explosion(explosion_pos)
                 
@@ -239,23 +238,33 @@ class Renderer3D:
                 
         for k in to_remove:
             del self.threat_entities[k]
-        
-        # Update HUD from environment stats (accurate source)
-        self.hud_hits.text = f'Saves: {self.env.threats_destroyed}'
-        self.hud_misses.text = f'Misses: {self.env.threats_missed}'
             
         # Add/Update living ones
         for t in current_threats:
             tid = id(t)
             tx, ty, tz = self._map_coords(t.x, t.y)
             
+            # IFF Color Logic
+            if hasattr(t, 'is_friendly') and t.is_friendly:
+                t_color = color.green  # FRIENDLY (Don't Shoot)
+            else:
+                t_color = color.red    # ENEMY (Shoot)
+                
+            # Shape Logic (Horizontal vs Vertical)
+            if hasattr(t, 'is_horizontal') and t.is_horizontal:
+                t_model = 'cube'  # UAV look (Boxy)
+            else:
+                t_model = 'sphere' # Falling rock look
+            
             if tid not in self.threat_entities:
                 # Create new
-                self.threat_entities[tid] = Entity(model='sphere', color=color.red, scale=2.0, position=(tx, ty, tz))
+                self.threat_entities[tid] = Entity(model=t_model, color=t_color, scale=2.0, position=(tx, ty, tz))
             else:
                 # Update pos - Direct assignment, no animation lag
                 self.threat_entities[tid].position = (tx, ty, tz)
+                self.threat_entities[tid].color = t_color # Ensure color is correct
                 self.threat_entities[tid].rotation_y += 1 # Spin effect
+
 
         # 3. Update Projectiles
         current_projs = ds.projectiles

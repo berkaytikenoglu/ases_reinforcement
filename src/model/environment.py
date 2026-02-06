@@ -36,7 +36,10 @@ class DefenseEnv(gym.Env):
         # 8: Wind Deflection Effect
         # 9: Ammo Ratio
         # 10: Threat Density (Count / Max)
-        # 11-14: Reserved / Zeros
+        # 11: Target Type (IFF) - 0.0 = Enemy, 1.0 = Friendly <<< IFF SENSOR
+        # 12: Flight Mode - 0.0 = Vertical, 1.0 = Horizontal <<< IFF SENSOR
+        # 13-14: Reserved
+
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(15,), dtype=np.float32)
         
         self.width = Params.SCREEN_WIDTH
@@ -71,19 +74,26 @@ class DefenseEnv(gym.Env):
             self.max_threats = Params.PHASE2_THREATS         # 3 Threats
             self.defense_system.ammo = Params.PHASE2_AMMO    # 3 Ammo (Strict)
             self.defense_system.cooldown_max = Params.PHASE2_RELOAD_TIME # Configurable Sniper Cooldown
-        else:
-            self.max_threats = Params.PHASE3_THREATS         # 10 Threats
-            self.defense_system.ammo = Params.PHASE3_AMMO    # 30 Ammo
-            self.defense_system.cooldown_max = Params.RELOAD_TIME # Normal (5)
+        elif self.curriculum_phase == 3:
+            self.max_threats = Params.PHASE3_THREATS         # 8 Threats
+            self.defense_system.ammo = Params.PHASE3_AMMO    # 20 Ammo
+            self.defense_system.cooldown_max = Params.PHASE3_RELOAD_TIME # Slower Reload (User Request)
+        else: # Phase 4+ (War Mode)
+            self.max_threats = getattr(Params, 'PHASE4_THREATS', 15)
+            self.defense_system.ammo = getattr(Params, 'PHASE4_AMMO', 40)
+            self.defense_system.cooldown_max = Params.RELOAD_TIME # Fast Reload for War Mode
             
         self.threats = []
         self.wind_force = random.uniform(-Params.MAX_WIND_FORCE, Params.MAX_WIND_FORCE)
         self.steps = 0
         
         self.threats_spawned = 0
+        self.threats_spawned_enemies = 0  # Only count hostile targets
         self.threats_destroyed = 0
         self.threats_missed = 0
         self.threats_hit_agent = 0
+        self.friendly_fire_count = 0      # Track friendly fire incidents
+
         
         # Configure Health based on Phase
         if self.curriculum_phase == 1:
@@ -184,6 +194,12 @@ class DefenseEnv(gym.Env):
             # 8: Wind Deflection
             obs[8] = self.wind_force
             
+            # 11: Target Type (IFF) - 0.0 = Enemy, 1.0 = Friendly
+            obs[11] = 1.0 if (hasattr(target, 'is_friendly') and target.is_friendly) else 0.0
+            
+            # 12: Flight Mode - 0.0 = Vertical (falling), 1.0 = Horizontal (UAV)
+            obs[12] = 1.0 if (hasattr(target, 'is_horizontal') and target.is_horizontal) else 0.0
+            
         return obs
 
     def step(self, action):
@@ -264,6 +280,13 @@ class DefenseEnv(gym.Env):
         if has_target < 0.5: # Only punish jitter when IDLE (No target)
             if delta_angle > 1.0: # Ignore tiny micro-movements
                  reward -= delta_angle * 0.05
+            
+            # --- NEUTRAL POSITION PENALTY ---
+            # User Request: "When idle, agent aims downward - looks bad"
+            # Punish aiming below horizon ONLY. Looking at sky is fine (threats come from there!)
+            angle_deg = math.degrees(self.defense_system.angle)
+            if angle_deg > 10.0:  # Aiming below horizon (positive = looking down)
+                reward -= (angle_deg - 10.0) * 0.15  # Proportional penalty for looking at ground
                  
         # Store current angle for next step jitter check
         self.prev_angle = self.defense_system.angle
@@ -364,7 +387,20 @@ class DefenseEnv(gym.Env):
         # If ammo is 0, no projectiles in air, but threats still exist/spawning -> FAILED
         if self.curriculum_phase > 1: # Phase 1 has infinite ammo
              # Check if we still have work to do
-             threats_remain = len(self.threats) > 0 or self.threats_spawned < target_threats
+             if self.curriculum_phase >= 3:
+                 # IFF Logic: Check if any ENEMIES remain
+                 active_enemies = sum(1 for t in self.threats if not (hasattr(t, 'is_friendly') and t.is_friendly))
+                 unspawned_enemies = (Params.PHASE3_THREATS * (1 - getattr(Params, 'PHASE3_FRIENDLY_RATIO', 0.4))) - self.threats_spawned_enemies
+                 # Allow some margin for unspawned calculation
+                 threats_remain = active_enemies > 0 or self.threats_spawned < target_threats
+                 # BUT: if we spawned enough enemies, we might be done even if total spawned < target
+                 # Simplified: Just check active enemies on screen for now to avoid complexity
+                 # If spawning implies more enemies coming, we rely on total count
+                 if self.threats_spawned >= target_threats and active_enemies == 0:
+                     threats_remain = False
+             else:
+                 threats_remain = len(self.threats) > 0 or self.threats_spawned < target_threats
+                 
              # Check if we are helpless
              is_helpless = self.defense_system.ammo <= 0 and len(self.defense_system.projectiles) == 0
              
@@ -384,7 +420,20 @@ class DefenseEnv(gym.Env):
             info['reason'] = 'episode_complete'
             
             # Mission SUCCESS (All targets down)
-            if self.threats_destroyed == self.threats_spawned:
+            # Phase 3 Special Condition: Destroy all ENEMIES, Spare Friendlies
+            is_success = False
+            
+            if self.curriculum_phase >= 3:
+                # Success = Killed all enemies (Friendly fire is just a penalty, not a mission fail)
+                # User Request: "Dost ateşi yapınca fail olması mantıksız"
+                if self.threats_destroyed >= self.threats_spawned_enemies:
+                    is_success = True
+            else:
+                # Classic Condition: Destroy all spawned threats
+                if self.threats_destroyed == self.threats_spawned:
+                    is_success = True
+            
+            if is_success:
                 # Win Bonus for Phase 3 (Full War)
                 if self.curriculum_phase == 3:
                     reward += Rewards.EPISODE_WIN_BONUS
@@ -395,6 +444,11 @@ class DefenseEnv(gym.Env):
                      unused_ammo = self.defense_system.ammo
                      ammo_bonus = unused_ammo * Rewards.AMMO_EFFICIENCY_BONUS
                      reward += ammo_bonus
+                
+                info['result'] = 'SUCCESS'
+            else:
+                # Finished spawning but missed some (or friendly fire fail)
+                pass # Default is just 'episode_complete' (Failed)
 
         # Max steps
         if self.steps >= 2000:
@@ -402,6 +456,8 @@ class DefenseEnv(gym.Env):
 
         info['hits'] = self.threats_destroyed
         info['spawned'] = self.threats_spawned
+        info['enemies'] = getattr(self, 'threats_spawned_enemies', 0) # DEBUG
+        info['friendly_fire'] = getattr(self, 'friendly_fire_count', 0) # DEBUG
         info['ammo'] = self.defense_system.ammo  # Remaining ammo
         info['shots'] = self.shots_fired         # Shots taken this episode
         info['health'] = self.agent_health       # Current health status
@@ -426,16 +482,19 @@ class DefenseEnv(gym.Env):
             
     def _spawn_threats(self):
         """Spawn threats with controlled rate and max concurrent limit"""
-        # Phase 1: Faster episodes (less threats, faster spawn)
+        # Phase-specific configuration
         if self.curriculum_phase == 1:
             max_threats = Params.PHASE1_THREATS_PER_EPISODE
             spawn_interval = Params.PHASE1_SPAWN_INTERVAL
         elif self.curriculum_phase == 2:
             max_threats = Params.PHASE2_THREATS
             spawn_interval = Params.SPAWN_INTERVAL
-        else:
+        elif self.curriculum_phase == 3:
             max_threats = Params.PHASE3_THREATS
             spawn_interval = Params.SPAWN_INTERVAL
+        else:  # Phase 4+
+            max_threats = Params.PHASE4_THREATS
+            spawn_interval = Params.SPAWN_INTERVAL // 2  # Faster spawn in War Mode
             
         # Don't spawn if we've reached the episode limit
         if self.threats_spawned >= max_threats:
@@ -450,18 +509,55 @@ class DefenseEnv(gym.Env):
         if self.spawn_timer >= spawn_interval:
             self.spawn_timer = 0
             
-            x = random.uniform(50, self.width - 50)
-            y = -400  # Spawn outside dome
-            target_x = self.width / 2
+            # === IFF LOGIC (Phase 3+) ===
+            is_friendly = False
+            is_horizontal = False
             
-            # Progressive Difficulty: Slower threats in Phase 1
-            if self.curriculum_phase == 1:
+            if self.curriculum_phase >= 3:
+                # Determine flight path first
+                horizontal_ratio = getattr(Params, 'PHASE3_HORIZONTAL_RATIO', 0.5)
+                is_horizontal = random.random() < horizontal_ratio
+                
+                # Determine friend/foe (ONLY IF HORIZONTAL)
+                # Meteors (Vertical) are ALWAYS enemies.
+                if is_horizontal:
+                    friendly_ratio = getattr(Params, 'PHASE3_FRIENDLY_RATIO', 0.4)
+                    is_friendly = random.random() < friendly_ratio
+                else:
+                    is_friendly = False
+            
+            # Spawn position based on flight type
+            if is_horizontal:
+                # Horizontal UAV: Spawn at sides, fly across screen at random height
+                spawn_side = random.choice(['left', 'right'])
+                if spawn_side == 'left':
+                    x = -50  # Off-screen left
+                else:
+                    x = self.width + 50  # Off-screen right
+                y = random.uniform(100, 400)  # Random altitude
+                target_x = self.width / 2  # Not used for horizontal
+            else:
+                # Original: Top-down spawn
+                x = random.uniform(50, self.width - 50)
+                y = -400  # Spawn outside dome (top)
+                target_x = self.width / 2
+            
+            # Progressive Difficulty: Slower threats in Phase 1, Faster UAVs in Phase 3
+            if is_horizontal and self.curriculum_phase >= 3:
+                 # UAV Speed (Faster) - User Request
+                 speed = random.uniform(Params.PHASE3_UAV_SPEED_MIN, Params.PHASE3_UAV_SPEED_MAX)
+            elif self.curriculum_phase == 1:
                 speed = random.uniform(Params.PHASE1_THREAT_SPEED_MIN, Params.PHASE1_THREAT_SPEED_MAX)
             else:
                 speed = random.uniform(Params.THREAT_SPEED_MIN, Params.THREAT_SPEED_MAX)
             
-            self.threats.append(Threat(x, y, speed, target_x, gravity=Params.GRAVITY))
+            # Create threat with IFF attributes
+            threat = Threat(x, y, speed, target_x, gravity=Params.GRAVITY, 
+                           is_friendly=is_friendly, is_horizontal=is_horizontal)
+            self.threats.append(threat)
             self.threats_spawned += 1
+            if not is_friendly:
+                self.threats_spawned_enemies += 1
             
     def _update_wind(self):
         if self.steps % Params.WIND_CHANGE_INTERVAL == 0:
@@ -471,6 +567,7 @@ class DefenseEnv(gym.Env):
     def _check_collisions(self):
         """Check projectile-threat collisions, return number of hits and engagement rewards"""
         hits = 0
+        friendly_hits = 0  # Track friendly fire
         engagement_reward = 0
         
         for proj in self.defense_system.projectiles[:]:
@@ -481,38 +578,44 @@ class DefenseEnv(gym.Env):
                     if proj in self.defense_system.projectiles:
                         self.defense_system.projectiles.remove(proj)
                     if t in self.threats:
-                        # Calculate distance to agent for strategy mode
-                        dist_to_agent = math.hypot(t.x - self.defense_system.x, t.y - self.defense_system.y)
-                        
-                        # ===== HETEROJEN STRATEJİ MODU =====
-                        # Distance Scaling Factor (0.0 - 1.0+)
-                        # Max range approx 800 pixels
-                        dist_factor = min(1.0, dist_to_agent / 800.0)
-                        dist_bonus = Rewards.HIT_REWARD * Rewards.DISTANCE_MULTIPLIER * dist_factor
-                        engagement_reward += dist_bonus
-                        
-                        if dist_to_agent > Rewards.EARLY_ENGAGEMENT_DISTANCE:
-                            # UZAK MESAFE (SCOPE): Çok erken önleme
-                            engagement_reward += Rewards.EARLY_HIT_BONUS
-                            engagement_reward += Rewards.AREA_DEFENSE_HIT_BONUS # Extra teşvik
-                        elif dist_to_agent > Rewards.AREA_DEFENSE_DISTANCE:
-                            # AREA DEFENSE MODE: Yüksek irtifa - parçalayıcı alan savunması
-                            engagement_reward += Rewards.AREA_DEFENSE_HIT_BONUS
-                            engagement_reward += Rewards.STRATEGY_MATCH_BONUS  # Doğru mod!
-                        elif dist_to_agent < Rewards.RAPID_FIRE_DISTANCE:
-                            # RAPID FIRE MODE: Kritik yakınlık - odaklı seri atış
-                            engagement_reward += Rewards.RAPID_FIRE_PRECISION_BONUS 
-                            engagement_reward += Rewards.STRATEGY_MATCH_BONUS  # Doğru mod!
+                        # === IFF CHECK (Phase 3+) ===
+                        if hasattr(t, 'is_friendly') and t.is_friendly:
+                            # FRIENDLY FIRE! Heavy penalty
+                            engagement_reward += Rewards.FRIENDLY_FIRE_PENALTY
+                            friendly_hits += 1
                         else:
-                            # ORTA MESAFE: Normal engagement bonus
-                            engagement_reward += 100.0 # Standart bonus
+                            # ENEMY HIT! Bonus reward
+                            engagement_reward += Rewards.ENEMY_HIT_BONUS
+                            
+                            # Calculate distance to agent for strategy mode
+                            dist_to_agent = math.hypot(t.x - self.defense_system.x, t.y - self.defense_system.y)
+                            
+                            # ===== HETEROJEN STRATEJİ MODU =====
+                            dist_factor = min(1.0, dist_to_agent / 800.0)
+                            dist_bonus = Rewards.HIT_REWARD * Rewards.DISTANCE_MULTIPLIER * dist_factor
+                            engagement_reward += dist_bonus
+                            
+                            if dist_to_agent > Rewards.EARLY_ENGAGEMENT_DISTANCE:
+                                engagement_reward += Rewards.EARLY_HIT_BONUS
+                                engagement_reward += Rewards.AREA_DEFENSE_HIT_BONUS
+                            elif dist_to_agent > Rewards.AREA_DEFENSE_DISTANCE:
+                                engagement_reward += Rewards.AREA_DEFENSE_HIT_BONUS
+                                engagement_reward += Rewards.STRATEGY_MATCH_BONUS
+                            elif dist_to_agent < Rewards.RAPID_FIRE_DISTANCE:
+                                engagement_reward += Rewards.RAPID_FIRE_PRECISION_BONUS 
+                                engagement_reward += Rewards.STRATEGY_MATCH_BONUS
+                            else:
+                                engagement_reward += 100.0
+                            
+                            hits += 1
                         
                         self.threats.remove(t)
-                        hits += 1
                         break
         
         self.last_engagement_reward = engagement_reward
+        self.friendly_fire_count = getattr(self, 'friendly_fire_count', 0) + friendly_hits
         return hits
+
 
     def _check_agent_collisions(self):
         """Check if any threat hit the defense system directly"""
@@ -529,13 +632,26 @@ class DefenseEnv(gym.Env):
         return hits
 
     def _check_threats_reached_base(self):
-        """Check if any threats reached the ground"""
+        """Check if any threats reached the ground OR escaped screen"""
         misses = 0
         for t in self.threats[:]:
-            # Threat reached ground (with some buffer for visual)
+            # 1. Vertical Threats (Meteors) - Hit Ground
             if t.y >= self.height + 50:
                 self.threats.remove(t)
                 misses += 1
+                continue
+                
+            # 2. Horizontal Threats (UAVs) - Left/Right Escape
+            # Buffer of 100px to ensure they fully left visual area
+            if t.x < -100 or t.x > self.width + 100:
+                self.threats.remove(t)
+                
+                # Logic: If Enemy Escapes -> Miss
+                # If Friendly Escapes -> Good (No penalty)
+                if hasattr(t, 'is_friendly') and t.is_friendly:
+                    pass # Friendly safely escaped
+                else:
+                    misses += 1 # Enemy escaped!
         return misses
     
     def get_episode_stats(self):

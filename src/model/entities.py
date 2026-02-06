@@ -36,46 +36,55 @@ class Projectile(Entity):
 
 
 class Threat(Entity):
-    def __init__(self, x, y, speed, target_x, gravity=50.0):
-        # Improved Ballistic/Falling Logic
-        # Goal: Hit (target_x, 600) starting from (x, y).
-        # Constraint: Start moving DOWN immediately (dy > 0).
-        # We set initial vertical velocity = speed (Downwards).
+    def __init__(self, x, y, speed, target_x, gravity=50.0, is_friendly=False, is_horizontal=False):
+        # IFF (Identification Friend or Foe) System
+        self.is_friendly = is_friendly  # True = Friend (Green), False = Enemy (Red)
+        self.is_horizontal = is_horizontal  # True = Horizontal flight (UAV style)
         
-        TARGET_Y = 600
-        dist_x = target_x - x
-        dist_y = TARGET_Y - y # Positive (e.g., 750)
-        
-        # Quadratic Equation for Time t:
-        # dist_y = dy_0 * t + 0.5 * g * t^2
-        # 0.5*g * t^2 + speed * t - dist_y = 0
-        
-        a = 0.5 * gravity
-        b = speed
-        c = -dist_y
-        
-        # Discriminant
-        # t = (-b + sqrt(b^2 - 4ac)) / 2a  (Only positive root matters)
-        delta = b**2 - 4*a*c
-        if delta < 0: delta = 0 # Should not happen if c is negative (dist_y positive)
-        
-        time_to_impact = (-b + math.sqrt(delta)) / (2*a)
-        
-        if time_to_impact <= 0: time_to_impact = 1.0 # Safety fallback
-        
-        # Horizontal velocity to close the X gap in exactly t seconds
-        dx = dist_x / time_to_impact
-        # Vertical velocity (Initial)
-        dy = speed 
-        
-        super().__init__(x, y, dx, dy)
-        self.radius = Params.THREAT_RADIUS
+        if is_horizontal:
+            # Horizontal UAV: Flies at constant altitude, left-to-right or right-to-left
+            dy = 0  # No vertical movement
+            # Direction based on spawn position
+            if x < 400:
+                dx = speed  # Spawn left, fly right
+            else:
+                dx = -speed  # Spawn right, fly left
+            super().__init__(x, y, dx, dy)
+            self.radius = Params.THREAT_RADIUS
+            self.gravity = 0  # No gravity for horizontal flight
+        else:
+            # Original ballistic/falling logic (top-down threats)
+            TARGET_Y = 600
+            dist_x = target_x - x
+            dist_y = TARGET_Y - y
+            
+            a = 0.5 * gravity
+            b = speed
+            c = -dist_y
+            
+            delta = b**2 - 4*a*c
+            if delta < 0: delta = 0
+            
+            time_to_impact = (-b + math.sqrt(delta)) / (2*a)
+            
+            if time_to_impact <= 0: time_to_impact = 1.0
+            
+            dx = dist_x / time_to_impact
+            dy = speed 
+            
+            super().__init__(x, y, dx, dy)
+            self.radius = Params.THREAT_RADIUS
+            self.gravity = gravity
 
     def update(self, dt, wind_force, gravity=9.8):
-        # Wind affects threats too, depending on their aerodynamics/weight
-        # For simulation, let's say it affects them slightly less than projectiles if they are heavy
-        self.dx += (wind_force * 0.5) * dt
-        self.dy += gravity * dt # Apply gravity acceleration
+        if self.is_horizontal:
+            # Horizontal flight: No gravity, minimal wind effect
+            self.dx += (wind_force * 0.1) * dt  # Very slight wind influence
+            # No dy change (constant altitude)
+        else:
+            # Original ballistic logic
+            self.dx += (wind_force * 0.5) * dt
+            self.dy += self.gravity * dt
         super().update(dt)
 
 class DefenseSystem:

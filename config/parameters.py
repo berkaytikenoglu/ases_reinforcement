@@ -14,7 +14,7 @@ class Params:
     AMMO_CAPACITY = 60
     AGENT_HEALTH = 3             # USER REQUEST: Reduced from 5 to 3 for higher stakes
     RELOAD_TIME = 5
-    PROJECTILE_SPEED = 500.0     # HIZLI VE ÖFKELİ: 300 -> 500 (Neredeyse laser gun!)
+    PROJECTILE_SPEED = 600.0     # HIZLI VE ÖFKELİ: 500 -> 600 (User Request)
     PROJECTILE_RADIUS = 40       
     THREAT_RADIUS = 50           
     
@@ -39,9 +39,24 @@ class Params:
     PHASE2_THREAT_SPEED_MIN = 20.0   
     PHASE2_THREAT_SPEED_MAX = 35.0   
 
-    # Phase 3 (Full Game)
-    PHASE3_THREATS = 10              # USER REQUEST: 10 Threads
-    PHASE3_AMMO = 30                 # USER REQUEST: 30 Ammo (3 per threat - More forgiving)
+    # Phase 3 (Curriculum): IFF Recognition (Friend or Foe)
+    PHASE3_EPISODES = 2500           # Standart: 2500 Episode
+    PHASE3_THREATS = 8               # Toplam hedef (dost + düşman karışık)
+    PHASE3_FRIENDLY_RATIO = 0.4      # %40 dost, %60 düşman
+    PHASE3_HORIZONTAL_RATIO = 0.5    # %50 yatay uçuş
+    PHASE3_AMMO = 20                 # Sadece düşmanlar için yeterli
+    PHASE3_HEALTH = 3                # 3 can (biraz tolerans)
+    PHASE3_RELOAD_TIME = 30          # SLOWER RELOAD: (User Request)
+    
+    # Phase 3 UAV Speed (Horizontal) - User Request: "Too Slow" -> Boosted
+    PHASE3_UAV_SPEED_MIN = 40.0
+    PHASE3_UAV_SPEED_MAX = 60.0      # Double the normal speed
+    
+    # Phase 4 (Curriculum): War Mode (Intense Combat)
+    PHASE4_THREATS = 15              # Yoğun savaş: 15 hedef
+    PHASE4_AMMO = 40                 # Bol mermi
+    PHASE4_HEALTH = 3                # 3 can
+
     
     # Episode Kuralları
     THREATS_PER_EPISODE = 10     # Normal: 10 tehdit/episode

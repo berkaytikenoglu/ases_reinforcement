@@ -137,6 +137,20 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
     print(f"Model: {model_path}")
     print(f"{'='*50}\n")
     
+    # FIX: "Dancing Agent" - Reset weights for new features if transferring to Phase 3
+    if init_phase >= 3:
+        # Check if we just loaded a model (we did above)
+        # If we are resuming Phase 3, this resets it again, which is mostly fine (re-learning IFF is fast)
+        # Ideally we only do this on FIRST transfer, but for now this ensures stability
+        print("PHASE 3 DETECTED: Zeroing out new feature weights (IFF, FlightMode) to prevent jitter...")
+        agent.reset_feature_weights([11, 12])
+        
+        # MEANINGFUL FIX: Force low exploration noise!
+        # Default is 0.6 (~35 deg), which causes dancing. Phase 2 ended with ~0.1.
+        # We set it to 0.15 (~8 deg) to allow some exploration but keep it steady.
+        print("PHASE 3: Forcing low action_std (0.15) for precision transfer...")
+        agent.set_action_std(0.15)
+
     # Start training visualizer (only for training mode, not test)
     visualizer = None
     if not test_mode:
@@ -223,13 +237,29 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             reason = info.get('reason', '')
             hp = info.get('health', 0)
             
+            # IFF Specific Stats
+            enemies_spawned = info.get('enemies', spawned) # Default to spawned if missing
+            friendly_fire = info.get('friendly_fire', 0)
+            
             result = "SUCCESS"
             # Strict logic: SUCCESS only if ANY spawned AND ALL spawned are destroyed
-            if spawned == 0 or hits < spawned:
-                 result = "FAILED"
+            # Phase 3 Override: Hits must equal ENEMIES, not TOTAL spawned
+            if env.curriculum_phase >= 3:
+                if enemies_spawned > 0 and (hits < enemies_spawned or friendly_fire > 0):
+                    result = "FAILED"
+                    if friendly_fire > 0: reason = f"FriendlyFire(x{friendly_fire})"
+                elif enemies_spawned == 0 and spawned > 0:
+                     # All friends passed?
+                     result = "SUCCESS" # No enemies to kill
+            else:
+                if spawned == 0 or hits < spawned:
+                     result = "FAILED"
                  
             if env.curriculum_phase == 1:
                 result = "TRAINING" # In Phase 1, it's always training, not failing
+                 
+            if reason == 'agent_died':
+                result = "DIED"
                  
             if reason == 'agent_died':
                 result = "DIED"
@@ -289,11 +319,26 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
                 ammo_used_pct = (ammo_used / current_max_ammo) * 100
             else:
                 ammo_used_pct = 0
-            print(f"Ep {i_episode:4d} | P{phase} | R: {current_ep_reward:6.1f} | Avg: {avg_reward:6.1f} | Hits: {hits}/{spawned} | Used: {ammo_used}/{current_max_ammo} ({ammo_used_pct:.0f}%) | {result}")
+            # Print Log
+            hits_str = f"{hits}/{spawned}"
+            ff_str = ""
+            if phase >= 3:
+                friendlies = spawned - enemies_spawned
+                hits_str = f"{hits}/{enemies_spawned} (Enemies) | Friends: {friendlies}"
+                if friendly_fire > 0:
+                    ff_str = f" | FF: {friendly_fire}"
+            
+            print(f"Ep {i_episode:4d} | P{phase} | R: {current_ep_reward:6.1f} | Avg: {avg_reward:6.1f} | Hits: {hits_str} | Used: {ammo_used}/{current_max_ammo} ({ammo_used_pct:.0f}%) | {result}{ff_str}")
             
             # Update training visualizer graphs
             if visualizer:
-                visualizer.add_episode(i_episode, current_ep_reward, avg_reward, hits, spawned, ammo_used, result)
+                # Pass friendly_fire count (defaults to 0 if var not present)
+                ff_val = friendly_fire if 'friendly_fire' in locals() else 0
+                # Pass enemies_spawned (For P1/P2, all spawned are enemies)
+                enemies_val = enemies_spawned if 'enemies_spawned' in locals() else spawned
+                
+                visualizer.add_episode(i_episode, current_ep_reward, avg_reward, hits, spawned, ammo_used, result, 
+                                     friendly_fire=ff_val, enemies_spawned=enemies_val)
                 if i_episode % 1 == 0:  # Update every episode (User Request: Real-time, Optimized)
                     visualizer.update_plots()
             

@@ -96,11 +96,26 @@ class Agent:
             print(f"[GPU] CUDA ENABLED: {torch.cuda.get_device_name(0)}")
         else:
             print("[CPU] GPU not available, using CPU")
-        
+            
         self.policy.to(self.device)
+        self.policy_old.to(self.device)
+
+    def reset_feature_weights(self, indices):
+        """Reset weights for specific input features to zero to prevent transfer shock"""
+        for model in [self.policy, self.policy_old]:
+            # Reset Actor input weights (Layer 0 is Linear)
+            model.actor[0].weight.data[:, indices] = 0.0
+            # Reset Critic input weights (Layer 0 is Linear)
+            model.critic[0].weight.data[:, indices] = 0.0
+        print(f"DEBUG: Reset weights for input features: {indices}")
         self.policy_old.to(self.device)
         self.policy.action_var = self.policy.action_var.to(self.device)
         self.policy_old.action_var = self.policy_old.action_var.to(self.device)
+        
+    def set_action_std(self, new_action_std):
+        """Update exploration noise std for both current and old policies"""
+        self.policy.set_action_std(new_action_std)
+        self.policy_old.set_action_std(new_action_std)
     
     def set_device(self, use_gpu=True):
         """Switch between CPU and GPU"""

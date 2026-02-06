@@ -89,9 +89,24 @@ class Renderer:
         for p in ds.projectiles:
             pygame.draw.circle(self.screen, (255, 255, 0), (int(p.x), int(p.y)), p.radius)
 
-        # Draw Threats
+        # Draw Threats (IFF Color Coding)
         for t in self.env.threats:
-            pygame.draw.circle(self.screen, (255, 50, 50), (int(t.x), int(t.y)), t.radius)
+            # IFF Color: Green = Friendly (DON'T SHOOT), Red = Enemy (SHOOT)
+            if hasattr(t, 'is_friendly') and t.is_friendly:
+                threat_color = (50, 255, 100)  # Bright Green = FRIEND
+            else:
+                threat_color = (255, 50, 50)   # Red = ENEMY
+            
+            # Shape: Circle for vertical, Rectangle for horizontal UAV
+            if hasattr(t, 'is_horizontal') and t.is_horizontal:
+                # Horizontal UAV - draw as rectangle/square
+                rect_size = int(t.radius * 1.2)
+                pygame.draw.rect(self.screen, threat_color, 
+                               (int(t.x - rect_size/2), int(t.y - rect_size/2), rect_size, rect_size))
+            else:
+                # Vertical threat - draw as circle
+                pygame.draw.circle(self.screen, threat_color, (int(t.x), int(t.y)), t.radius)
+
 
         # Draw Wind Indicator
         wind_start_x = self.width - 100

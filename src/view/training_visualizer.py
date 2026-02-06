@@ -12,6 +12,7 @@ matplotlib.use('TkAgg')  # Use TkAgg backend for live updates
 import numpy as np
 from collections import deque
 import threading
+from matplotlib.ticker import MaxNLocator
 import threading
 import time
 import sys
@@ -46,6 +47,13 @@ class TrainingVisualizer:
         self.success_rate_window = deque(maxlen=50)
         self.success_rates = []
         
+        # IFF Hit Rates
+        self.enemy_hit_rates = []
+        self.friendly_hit_rates = []
+        
+        # New: IFF Stats
+        self.friendly_fires = []
+        
         # Plot setup
         self.fig = None
         self.axes = None
@@ -68,7 +76,8 @@ class TrainingVisualizer:
         parts = [
             get_fmt(1, "NİŞAN EĞİTİMİ"),
             get_fmt(2, "SNIPER MODU"),
-            get_fmt(3, "TAM SAVAŞ")
+            get_fmt(3, "IFF & UAV"),
+            get_fmt(4, "SAVAŞ MODU")
         ]
         return "  ──  ".join(parts)
         
@@ -109,8 +118,9 @@ class TrainingVisualizer:
         # DUPLICATE REMOVED
         
         
-    def add_episode(self, episode, reward, avg_reward, hits, spawned, ammo_used, result):
+    def add_episode(self, episode, reward, avg_reward, hits, spawned, ammo_used, result, friendly_fire=0, enemies_spawned=None):
         """Add data for a completed episode"""
+        if enemies_spawned is None: enemies_spawned = spawned # Fallback
         with self.lock:
             self.episodes.append(episode)
             self.rewards.append(reward)
@@ -118,6 +128,7 @@ class TrainingVisualizer:
             self.hits.append(hits)
             self.spawned.append(spawned)
             self.misses.append(spawned - hits) # Calculate misses
+            self.friendly_fires.append(friendly_fire)
             self.ammo_used.append(ammo_used)
             self.results.append(result)
             
@@ -133,9 +144,27 @@ class TrainingVisualizer:
             current_fail_rate = np.mean(self.fail_rate_window) * 100
             self.fail_rates.append(current_fail_rate)
             
-            # Calculate hit rate
+            # Calculate hit rate (Total - Legacy)
             hit_rate = (hits / spawned * 100) if spawned > 0 else 0
             self.hit_rates.append(hit_rate)
+            
+            # --- IFF ACCURACY RATES ---
+            # 1. Enemy Hit Rate (Good)
+            if enemies_spawned > 0:
+                enemy_rate = (hits / enemies_spawned) * 100
+                if enemy_rate > 100: enemy_rate = 100 # Cap
+            else:
+                enemy_rate = 0
+            self.enemy_hit_rates.append(enemy_rate)
+            
+            # 2. Friendly Hit Rate (Bad)
+            friendlies_spawned = spawned - enemies_spawned
+            if friendlies_spawned > 0:
+                friendly_rate = (friendly_fire / friendlies_spawned) * 100
+                if friendly_rate > 100: friendly_rate = 100 # Cap
+            else:
+                friendly_rate = 0
+            self.friendly_hit_rates.append(friendly_rate)
             
             # Update success rate
             is_success = 1 if result == 'SUCCESS' else 0
@@ -158,6 +187,10 @@ class TrainingVisualizer:
                 # Trim new lists too
                 self.death_rates = self.death_rates[-self.max_history:]
                 self.fail_rates = self.fail_rates[-self.max_history:]
+                self.fail_rates = self.fail_rates[-self.max_history:]
+                self.friendly_fires = self.friendly_fires[-self.max_history:]
+                self.enemy_hit_rates = self.enemy_hit_rates[-self.max_history:]
+                self.friendly_hit_rates = self.friendly_hit_rates[-self.max_history:]
     
     def update_plots(self):
         """Refresh the plots with current data (OPTIMIZED: set_data)"""
@@ -179,15 +212,18 @@ class TrainingVisualizer:
                 self.axes[0, 0].set_ylabel('Ödül')
                 self.axes[0, 0].legend(loc='upper left', fontsize=8)
                 
-                # 2. Success Rate
-                self.lines['success'], = self.axes[0, 1].plot([], [], '#00ff88', linewidth=2)
-                self.axes[0, 1].set_title('Başarı Oranı (50 Bölüm)', color='#00ff88')
+                # 2. IFF Accuracy (Replacing Success Rate)
+                self.lines['enemy_rate'], = self.axes[0, 1].plot([], [], '#00ff88', linewidth=2, label='Düşman Vurma %')
+                self.lines['friendly_rate'], = self.axes[0, 1].plot([], [], '#ff0000', linewidth=2, label='Dost Vurma %')
+                self.axes[0, 1].set_title('IFF Performansı (Hedef Vurma)', color='#ffffff')
                 self.axes[0, 1].set_ylim(0, 105)
+                self.axes[0, 1].legend(loc='upper left', fontsize=8)
                 
-                # 3. Losses
-                self.lines['died'], = self.axes[0, 2].plot([], [], '#ff0000', linewidth=2, label='Ölüm %')
-                self.lines['failed'], = self.axes[0, 2].plot([], [], '#ff9900', linewidth=2, linestyle='--', label='Başarısız %')
-                self.axes[0, 2].set_title('Kayıp Oranı (Son 50)', color='#ff4444')
+                # 3. Outcome Rates (Consolidated: Success / Fail / Death)
+                self.lines['outcome_success'], = self.axes[0, 2].plot([], [], '#00ff88', linewidth=2, label='Başarı %')
+                self.lines['outcome_failed'], = self.axes[0, 2].plot([], [], '#ff9900', linewidth=2, linestyle='--', label='Başarısız %')
+                self.lines['outcome_died'], = self.axes[0, 2].plot([], [], '#ff0000', linewidth=2, linestyle=':', label='Ölüm %')
+                self.axes[0, 2].set_title('Sonuç Dağılımı (Son 50)', color='#ffffff')
                 self.axes[0, 2].set_ylim(0, 105)
                 self.axes[0, 2].legend(loc='upper left', fontsize=8)
 
@@ -205,31 +241,33 @@ class TrainingVisualizer:
                 self.axes[1, 1].set_ylabel('Kullanılan Mermi')
                 self.axes[1, 1].set_ylim(bottom=0) # USER REQUEST: Fix negative axis
                 
-                # 6. Survival Rate (USER REQUEST: Hayatta Kalma Oranı)
-                self.lines['survival'], = self.axes[1, 2].plot([], [], '#00ff00', linewidth=2)
-                self.axes[1, 2].set_title('Hayatta Kalma Oranı (50 Bölüm)', color='#00ff00')
+                # 6. Friendly Fire (Replacing Survival Rate)
+                self.lines['friendly_fire'], = self.axes[1, 2].plot([], [], '#ff00ff', linewidth=2, label='Dost Ateşi')
+                self.axes[1, 2].set_title('Dost Ateşi (Friendly Fire)', color='#ff00ff')
                 self.axes[1, 2].set_xlabel('Bölüm')
-                self.axes[1, 2].set_ylabel('%')
-                self.axes[1, 2].set_ylim(0, 105)
+                self.axes[1, 2].set_ylabel('Vuruş Sayısı')
+                self.axes[1, 2].set_ylim(0, 20) # USER REQUEST: Fix "0.00-0.05" scale -> Range 0-20
+                self.axes[1, 2].yaxis.set_major_locator(MaxNLocator(integer=True))
                 
             # --- UPDATE DATA ---
             self.lines['reward'].set_data(eps, self.rewards)
             self.lines['avg_reward'].set_data(eps, self.avg_rewards)
-            self.lines['success'].set_data(eps, self.success_rates)
             
+            self.lines['enemy_rate'].set_data(eps, self.enemy_hit_rates)
+            self.lines['friendly_rate'].set_data(eps, self.friendly_hit_rates)
             if len(self.death_rates) == len(eps):
-                self.lines['died'].set_data(eps, self.death_rates)
-                self.lines['failed'].set_data(eps, self.fail_rates)
+                self.lines['outcome_success'].set_data(eps, self.success_rates)
+                self.lines['outcome_failed'].set_data(eps, self.fail_rates)
+                self.lines['outcome_died'].set_data(eps, self.death_rates)
+                
+            # Friendly Fire
+            self.lines['friendly_fire'].set_data(eps, self.friendly_fires)
             
             self.lines['hits'].set_data(eps, self.hits)
             self.lines['missed'].set_data(eps, self.misses)
             self.lines['spawned'].set_data(eps, self.spawned)
             self.lines['ammo'].set_data(eps, self.ammo_used)
             
-            # Survival Rate = 100 - Death Rate
-            if len(self.death_rates) == len(eps):
-                survival_rates = [100 - dr for dr in self.death_rates]
-                self.lines['survival'].set_data(eps, survival_rates)
             
             # --- RESCALE AXES ---
             for ax in self.axes.flat:
@@ -262,18 +300,30 @@ class TrainingVisualizer:
                     phase_info = "FAZ 1: NİŞAN EĞİTİMİ"
                 elif self.current_phase == 2:
                     phase_info = "FAZ 2: TEK MERMİ"
+                elif self.current_phase == 3:
+                     phase_info = "FAZ 3: IFF & UAV"
                 else:
-                    phase_info = "FAZ 3: TAM SAVAŞ"
+                    phase_info = "FAZ 4: TAM SAVAŞ"
                 
                 # Update Timeline Text
                 if hasattr(self, 'timeline_text'):
                     self.timeline_text.set_text(self._build_timeline_text())
                 
                 # CLEAN MINIMALIST HEADER (User Request)
-                header_text = (f"ASES OTONOM SAVUNMA AJANI | {phase_info}\n"
-                               f"Hedef: {self.max_episodes} Bölüm | İlerleme: {eps[-1]} ({eps[-1]/self.max_episodes*100:.1f}%) | Ort Ödül: {latest_avg:.0f}")
+                # Calculate Best Reward
+                max_reward = max(self.rewards)
+                best_ep_idx = self.rewards.index(max_reward)
+                best_ep = eps[best_ep_idx]
                 
-                self.fig.suptitle(header_text, fontsize=11, fontweight='bold', color='white')
+                # Status Flags (Inferred)
+                god_mode_status = "AÇIK" if Params.AGENT_HEALTH > 10 else "KAPALI"
+                fire_status = "AÇIK" # Always open in training
+                
+                header_text = (f"ASES OTONOM SAVUNMA AJANI | {phase_info}\n"
+                               f"Hedef: {self.max_episodes} Bölüm | İlerleme: {eps[-1]} ({eps[-1]/self.max_episodes*100:.1f}%) | Ort: {latest_avg:.0f} | Best: {max_reward:.0f} (Ep {best_ep})\n"
+                               f"Ölümsüzlük: {god_mode_status} | Ateş: {fire_status}")
+                               
+                self.fig.suptitle(header_text, fontsize=10, fontweight='bold', color='white')
 
             try:
                 # Use draw_idle for optimized redraw
