@@ -41,7 +41,7 @@ def list_models():
                 models.append(f.replace('.pth', ''))
     return sorted(models)
 
-def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test_mode=False, starting_phase=None):
+def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test_mode=False, starting_phase=None, load_model_name=None):
     # Determine initial phase: Override > Default(1)
     init_phase = starting_phase if starting_phase is not None else 1
     env = DefenseEnv(curriculum_phase=init_phase) 
@@ -110,9 +110,31 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
         save_path = model_path
     
     # Load existing model if exists
-    if os.path.exists(model_path):
-        print(f"Loading model from {model_path}")
-        agent.load(model_path)
+    load_path = model_path
+    
+    # Override load path if explicit source provided
+    if load_model_name:
+        print(f"DEBUG: Explicitly loading from model: {load_model_name}")
+        # Check folder structure
+        src_dir = os.path.join(MODELS_DIR, load_model_name)
+        src_latest = os.path.join(src_dir, f"{load_model_name}_latest.pth")
+        src_best = os.path.join(src_dir, f"{load_model_name}_best.pth")
+        src_legacy = os.path.join(MODELS_DIR, f"{load_model_name}.pth")
+        
+        if os.path.exists(src_latest):
+            load_path = src_latest
+        elif os.path.exists(src_best):
+            print("Latest not found, loading best...")
+            load_path = src_best
+        elif os.path.exists(src_legacy):
+            load_path = src_legacy
+        else:
+            print(f"WARNING: Source model {load_model_name} not found! Starting fresh.")
+            load_path = None
+
+    if load_path and os.path.exists(load_path):
+        print(f"Loading model from {load_path}")
+        agent.load(load_path)
     else:
         if test_mode:
             print(f"Model not found: {model_path}")
@@ -137,19 +159,19 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
     print(f"Model: {model_path}")
     print(f"{'='*50}\n")
     
-    # FIX: "Dancing Agent" - Reset weights for new features if transferring to Phase 3
-    if init_phase >= 3:
-        # Check if we just loaded a model (we did above)
-        # If we are resuming Phase 3, this resets it again, which is mostly fine (re-learning IFF is fast)
-        # Ideally we only do this on FIRST transfer, but for now this ensures stability
-        print("PHASE 3 DETECTED: Zeroing out new feature weights (IFF, FlightMode) to prevent jitter...")
+    # FIX: "Reset weights" - ONLY do this when transferring from Phase 2 to Phase 3 for the first time
+    # If we are loading a model that already has Phase 3 experience (e.g. Phase 4 or resuming Phase 3), DO NOT RESET.
+    if init_phase >= 3 and load_model_name and "Phase 2" in load_model_name:
+        print("TRANSFER DETECTED: Phase 2 -> Phase 3. Zeroing out new feature weights (IFF, FlightMode)...")
         agent.reset_feature_weights([11, 12])
         
-        # MEANINGFUL FIX: Force low exploration noise!
-        # Default is 0.6 (~35 deg), which causes dancing. Phase 2 ended with ~0.1.
-        # We set it to 0.15 (~8 deg) to allow some exploration but keep it steady.
-        print("PHASE 3: Forcing low action_std (0.15) for precision transfer...")
+        # MEANINGFUL FIX: Force low exploration noise for transfer
+        print("PHASE 3 TRANSFER: Forcing low action_std (0.15) for stability...")
         agent.set_action_std(0.15)
+    elif init_phase >= 3 and not load_path:
+        # Starting Phase 3/4 from scratch (No model loaded)
+        print("STARTING FRESH PHASE 3/4: Initializing with low noise...")
+        agent.set_action_std(0.2)
 
     # Start training visualizer (only for training mode, not test)
     visualizer = None
@@ -328,7 +350,7 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
                 if friendly_fire > 0:
                     ff_str = f" | FF: {friendly_fire}"
             
-            print(f"Ep {i_episode:4d} | P{phase} | R: {current_ep_reward:6.1f} | Avg: {avg_reward:6.1f} | Hits: {hits_str} | Used: {ammo_used}/{current_max_ammo} ({ammo_used_pct:.0f}%) | {result}{ff_str}")
+            print(f"Ep {i_episode:4d} | P{phase} | R: {current_ep_reward:6.1f} | Avg: {avg_reward:6.1f} | SR: {success_rate:4.1f}% | Hits: {hits_str} | Used: {ammo_used}/{current_max_ammo} ({ammo_used_pct:.0f}%) | {result}{ff_str}")
             
             # Update training visualizer graphs
             if visualizer:
@@ -382,8 +404,28 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
     print(f"DONE! {'Test' if test_mode else 'Training'} Complete!")
     print(f"Final Average Reward (last 100): {np.mean(total_rewards[-100:]):.2f}")
     print(f"Best Reward: {best_reward:.2f}")
+    print(f"Final Success Rate (last 100): {success_rate:.1f}%")
     print(f"Total Time: {elapsed/60:.1f} minutes")
     print(f"{'='*50}")
+
+    if test_mode:
+        print("\nTest Finished. Visualization window is open.")
+        print("Press Ctrl+C in terminal OR click 'Stop' in UI to close.")
+        try:
+            # If running from UI (no TTY), input() would crash.
+            # We loop forever until external termination.
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+    # HARD RULE: Check minimum success rate before finishing
+    if not test_mode and getattr(args, 'min_success', None) is not None:
+        threshold = args.min_success * 100
+        if success_rate < threshold:
+            print(f"\n !!! CRITICAL FAILURE: Success Rate ({success_rate:.1f}%) is below Threshold ({threshold:.1f}%) !!!")
+            print(" !!! ABORTING CURRICULUM: Training did not reach required proficiency. !!!\n")
+            sys.exit(1) # This stops the .bat script!
             
     if render and renderer:
         renderer.close()
@@ -414,7 +456,9 @@ if __name__ == '__main__':
     parser.add_argument('--p3-eps', type=int, default=None, help='Override Phase 3 Episodes')
     
     # Single Phase Training Mode
-    parser.add_argument('--only-phase', type=int, choices=[1, 2, 3], default=None, help='Train ONLY this phase for the entire duration')
+    parser.add_argument('--load-model', type=str, default=None, help='Load weights from a DIFFERENT model (Transfer Learning)')
+    parser.add_argument('--only-phase', type=int, choices=[1, 2, 3, 4], default=None, help='Train ONLY this phase for the entire duration')
+    parser.add_argument('--min-success', type=float, default=None, help='Minimum success rate (0.0 to 1.0) required to finish via exit code 0')
 
     args = parser.parse_args()
     
@@ -437,6 +481,11 @@ if __name__ == '__main__':
             args.phase = 3 # Force start at 3
             Params.PHASE3_EPISODES = args.episodes
             print(f"DEBUG: Starting at Phase 3 (Locking Phase 3)")
+            
+        elif args.only_phase == 4:
+            args.phase = 4 # Force start at 4
+            # Phase 4 is usually the final one, so we just set MAX_EPISODES implicitly by the loop
+            print(f"DEBUG: Starting at Phase 4 (Locking Phase 4)")
 
     # Apply Overrides to Params BEFORE Environment Init
     if args.p1_eps is not None:
@@ -487,5 +536,6 @@ if __name__ == '__main__':
         max_episodes=args.episodes,
         model_name=args.model,
         test_mode=args.test,
-        starting_phase=args.phase
+        starting_phase=args.phase,
+        load_model_name=args.load_model
     )

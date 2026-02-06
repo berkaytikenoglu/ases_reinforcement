@@ -106,6 +106,7 @@ class DefenseEnv(gym.Env):
         self.shots_fired = 0
         self.spawn_timer = 100 # Instant spawn logic
         self.hit_streak = 0
+        self.threats_missed_ground = 0 # Track critical ground hits separately
         
         # Anti-Jitter: Reset previous angle to current (fresh start)
         self.prev_angle = self.defense_system.angle
@@ -348,28 +349,40 @@ class DefenseEnv(gym.Env):
             else:
                 reward += Rewards.HIT_REWARD * hits
         
-        # Misses (Ground Hits)
-        misses = self._check_threats_reached_base()
-        self.threats_missed += misses
+        # Misses (Ground Hits & Escapes)
+        ground_misses, uav_escapes = self._check_threats_reached_base()
+        self.threats_missed += (ground_misses + uav_escapes)
+        self.threats_missed_ground += ground_misses
         
-        if misses > 0:
-            if self.curriculum_phase == 1:
-                pass # FAZ 1: Kaçırma cezası yok (Sadece odaklan)
-            elif self.curriculum_phase == 2:
-                reward -= 500.0 # Phase 2 Miss Penalty (Stronger punishment)
-                # DO NOT TERMINATE immediately (Keep going for remaining threats)
-                # terminated = True
-                info['result'] = 'Miss'
-            elif self.curriculum_phase == 3:
-                reward += Rewards.GROUND_HIT_PENALTY * misses
+        # Penalties
+        if self.curriculum_phase == 1:
+            pass
+        elif self.curriculum_phase == 2:
+             if ground_misses > 0: reward -= 500.0
+        elif self.curriculum_phase == 3:
+            # Phase 3 Professional Logic:
+            # 1. Meteors (Ground Hits) -> Heavy Penalty (-5000)
+            if ground_misses > 0:
+                reward += Rewards.GROUND_HIT_PENALTY * ground_misses
+            
+            # 2. UAVs (Escapes) -> Light Penalty (-200) - "Vuramazsa hafif ceza"
+            if uav_escapes > 0:
+                reward += Rewards.UAV_ESCAPE_PENALTY * uav_escapes
         
-        # Agent Death
+        # Agent Death / Base Damage
         agent_hits = self._check_agent_collisions()
-        if agent_hits > 0:
+        
+        # Calculate Total Damage
+        # Phase 3: Ground Hits (Meteors) also hurt base health!
+        base_damage = agent_hits
+        if self.curriculum_phase >= 3:
+            base_damage += ground_misses 
+            
+        if base_damage > 0:
             if self.curriculum_phase == 1:
                 pass # FAZ 1: Ölümsüzlük (Eğitime devam)
             else:
-                self.agent_health -= agent_hits
+                self.agent_health -= base_damage
                 if self.agent_health <= 0:
                     reward += Rewards.DEATH_PENALTY
                     terminated = True
@@ -405,10 +418,31 @@ class DefenseEnv(gym.Env):
              is_helpless = self.defense_system.ammo <= 0 and len(self.defense_system.projectiles) == 0
              
              if is_helpless and threats_remain:
-                 reward += Rewards.AMMO_DEPLETED_PENALTY # -10000
-                 terminated = True
-                 info['result'] = 'AmmoFail'
-                 info['reason'] = 'ammo_depleted'
+                 # CRITICAL CHECK: Are the remaining threats Dangerous Meteors or Optional UAVs?
+                 critical_threats_exist = False
+                 for t in self.threats:
+                     # Vertical threats are critical (Meteors)
+                     if not (hasattr(t, 'is_horizontal') and t.is_horizontal):
+                         critical_threats_exist = True
+                         break
+                 
+                 if critical_threats_exist:
+                     # We failed to stop a meteor because we have no ammo -> FAIL
+                     reward += Rewards.AMMO_DEPLETED_PENALTY
+                     terminated = True
+                     info['result'] = 'AmmoFail'
+                     info['reason'] = 'ammo_depleted'
+                 elif self.curriculum_phase >= 3:
+                     # Only UAVs remain -> We are out of ammo but safe. 
+                     # Just end the episode (Let them escape naturally or force end)
+                     terminated = True
+                     info['reason'] = 'out_of_ammo_safe'
+                     # No Penalty. The 'UAV Escape' penalties will be calculated naturally or negligible.
+                 else:
+                     # Phase 1/2 (all vertical) defaults to critical check usually
+                     reward += Rewards.AMMO_DEPLETED_PENALTY
+                     terminated = True
+                     info['result'] = 'AmmoFail'
         
         # Terminate Condition: All threats spawned and cleared
         # We wait for: 
@@ -424,9 +458,11 @@ class DefenseEnv(gym.Env):
             is_success = False
             
             if self.curriculum_phase >= 3:
-                # Success = Killed all enemies (Friendly fire is just a penalty, not a mission fail)
-                # User Request: "Dost ateşi yapınca fail olması mantıksız"
-                if self.threats_destroyed >= self.threats_spawned_enemies:
+                # Success Logic (User "Cookie" Request):
+                # 1. No Friendly Fire (Strict)
+                # 2. No Ground Hits (Meteors - Critical Defense)
+                # 3. UAVs? Optional. (Cookie Bonus)
+                if self.friendly_fire_count == 0 and self.threats_missed_ground == 0:
                     is_success = True
             else:
                 # Classic Condition: Destroy all spawned threats
@@ -633,26 +669,29 @@ class DefenseEnv(gym.Env):
 
     def _check_threats_reached_base(self):
         """Check if any threats reached the ground OR escaped screen"""
-        misses = 0
+        ground_misses = 0
+        uav_escapes = 0
+        
         for t in self.threats[:]:
-            # 1. Vertical Threats (Meteors) - Hit Ground
+            # 1. Vertical Threats (Meteors) - Hit Ground (CRITICAL)
             if t.y >= self.height + 50:
                 self.threats.remove(t)
-                misses += 1
+                ground_misses += 1
                 continue
                 
-            # 2. Horizontal Threats (UAVs) - Left/Right Escape
+            # 2. Horizontal Threats (UAVs) - Left/Right Escape (MINOR)
             # Buffer of 100px to ensure they fully left visual area
             if t.x < -100 or t.x > self.width + 100:
                 self.threats.remove(t)
                 
-                # Logic: If Enemy Escapes -> Miss
-                # If Friendly Escapes -> Good (No penalty)
+                # Logic: If Enemy Escapes -> Miss (Light Penalty)
+                # If Friendly Escapes -> Good (Bonus)
                 if hasattr(t, 'is_friendly') and t.is_friendly:
-                    pass # Friendly safely escaped
+                    # Reward for letting friendly pass safely
+                    pass 
                 else:
-                    misses += 1 # Enemy escaped!
-        return misses
+                    uav_escapes += 1 # Enemy escaped!
+        return ground_misses, uav_escapes
     
     def get_episode_stats(self):
         """Return current episode statistics"""

@@ -97,6 +97,7 @@ class Renderer3D:
         
         # Entities Cache
         self.threat_entities = {} # Map object logic ID -> Ursina Entity
+        self.threat_labels = {}   # Map object logic ID -> Ursina Text (IFF Labels)
         self.projectile_entities = {}
         
         # Lighting
@@ -106,14 +107,19 @@ class Renderer3D:
         # Instructions
         Text(text='Controls:\n[W,A,S,D] Move (Hold Shift for Speed)\n[Q,E] Up/Down\n[Right Click+Drag] Look\n[Scroll] Zoom', position=(-0.85, 0.45), origin=(-0.5, 0.5), color=color.white)
         
-        # HUD Elements (Top Right)
-        self.hud_ammo = Text(text='Ammo: --', position=(0.65, 0.45), origin=(0, 0.5), color=color.yellow, scale=1.5)
-        self.hud_hits = Text(text='Saves: 0', position=(0.65, 0.40), origin=(0, 0.5), color=color.green, scale=1.5)
-        self.hud_misses = Text(text='Misses: 0', position=(0.65, 0.35), origin=(0, 0.5), color=color.red, scale=1.5)
-        self.hud_episode = Text(text='Episode: 1', position=(0.65, 0.30), origin=(0, 0.5), color=color.white, scale=1.2)
-        self.hud_spawned = Text(text='Spawned: 0/50', position=(0.65, 0.25), origin=(0, 0.5), color=color.cyan, scale=1.2)
-        self.hud_threats = Text(text='Active: 0', position=(0.65, 0.20), origin=(0, 0.5), color=color.orange, scale=1.2)
-        self.hud_hp = Text(text='HEALTH: 3', position=(0.65, 0.15), origin=(0, 0.5), color=color.green, scale=2.0)
+        # HUD Elements
+        # 1. Top Section (Phase & Episode)
+        self.hud_phase = Text(text='PHASE: --', position=(0, 0.48), origin=(0, 0.5), color=color.cyan, scale=1.5, background=True)
+        self.hud_episode = Text(text='Episode: 1', position=(0, 0.44), origin=(0, 0.5), color=color.white, scale=1.2)
+        
+        # 2. Right Section (Stats)
+        self.hud_ammo = Text(text='Ammo: --', position=(0.85, 0.45), origin=(0.5, 0.5), color=color.yellow, scale=1.2)
+        self.hud_hits = Text(text='Saves: 0', position=(0.85, 0.40), origin=(0.5, 0.5), color=color.green, scale=1.2)
+        self.hud_misses = Text(text='Misses: 0', position=(0.85, 0.35), origin=(0.5, 0.5), color=color.red, scale=1.2)
+        self.hud_spawned = Text(text='Spawned: 0/0', position=(0.85, 0.30), origin=(0.5, 0.5), color=color.white, scale=1.1)
+        
+        # 3. Health (Bottom Center - Critical)
+        self.hud_hp = Text(text='HEALTH: 3', position=(0, -0.45), origin=(0, 0.5), color=color.green, scale=2.0)
         
         # Stats tracking
         self.total_hits = 0
@@ -123,6 +129,14 @@ class Renderer3D:
         self.env = env
         self.width_scale = 100.0 / Params.SCREEN_WIDTH 
         self.height_scale = 100.0 / Params.SCREEN_HEIGHT
+        
+        # Determine Max Health for dynamic coloring (Snapshot at start)
+        self.max_health = env.agent_health if hasattr(env, 'agent_health') else 3
+        
+        # Update Phase Text immediately
+        p_names = {1: "AIM TRAINING", 2: "ELITE SNIPER", 3: "IFF / UAV", 4: "WAR MODE"}
+        p_name = p_names.get(env.curriculum_phase, "UNKNOWN")
+        self.hud_phase.text = f"PHASE {env.curriculum_phase}: {p_name}"
         
     def _map_coords(self, x, y):
         new_x = (x - Params.SCREEN_WIDTH/2) * 0.1
@@ -181,20 +195,31 @@ class Renderer3D:
         # UPDATE HUD
         ds = self.env.defense_system
         self.hud_ammo.text = f'Ammo: {ds.ammo}/{ds.ammo_capacity}'
-        self.hud_threats.text = f'Active: {len(self.env.threats)}'
+        # self.hud_threats.text = f'Active: {len(self.env.threats)}' # Removed from UI
         
         # Dynamic target threats based on phase
-        target_threats = Params.PHASE1_THREATS_PER_EPISODE if self.env.curriculum_phase == 1 else \
-                         (1 if self.env.curriculum_phase == 2 else Params.THREATS_PER_EPISODE)
-                         
-        self.hud_spawned.text = f'Spawned: {self.env.threats_spawned}/{target_threats}'
+        total_targets = {
+            1: Params.PHASE1_THREATS_PER_EPISODE,
+            2: Params.PHASE2_THREATS,
+            3: Params.PHASE3_THREATS,
+            4: Params.PHASE4_THREATS
+        }
+        target_threats = total_targets.get(self.env.curriculum_phase, Params.THREATS_PER_EPISODE)
+        
+        # READ STATS FROM ENV DIRECTLY             
+        self.hud_hits.text = f'Saves: {getattr(self.env, "threats_destroyed", 0)}'
+        self.hud_misses.text = f'Misses: {getattr(self.env, "threats_missed", 0)}'
+        self.hud_spawned.text = f'Spawned: {getattr(self.env, "threats_spawned", 0)}/{target_threats}'
         
         # Update HP
         hp = max(0, self.env.agent_health)
         self.hud_hp.text = f'HEALTH: {hp}'
-        if hp >= 3:
+        
+        # Dynamic Coloring
+        ratio = hp / self.max_health if self.max_health > 0 else 0
+        if ratio > 0.66:
             self.hud_hp.color = color.green
-        elif hp == 2:
+        elif ratio > 0.33:
             self.hud_hp.color = color.yellow
         else:
             self.hud_hp.color = color.red
@@ -234,6 +259,12 @@ class Renderer3D:
                     self._create_explosion(explosion_pos)
                 
                 destroy(t_entity)
+                
+                # Destroy Label
+                if t_logic_id in self.threat_labels:
+                    destroy(self.threat_labels[t_logic_id])
+                    del self.threat_labels[t_logic_id]
+                    
                 to_remove.append(t_logic_id)
                 
         for k in to_remove:
@@ -244,26 +275,46 @@ class Renderer3D:
             tid = id(t)
             tx, ty, tz = self._map_coords(t.x, t.y)
             
-            # IFF Color Logic
-            if hasattr(t, 'is_friendly') and t.is_friendly:
+            # IFF Logic
+            is_friend = hasattr(t, 'is_friendly') and t.is_friendly
+            if is_friend:
                 t_color = color.green  # FRIENDLY (Don't Shoot)
+                lbl_text = "FRIEND"
+                lbl_color = color.green
             else:
                 t_color = color.red    # ENEMY (Shoot)
+                lbl_text = "FOE"
+                lbl_color = color.red
                 
             # Shape Logic (Horizontal vs Vertical)
             if hasattr(t, 'is_horizontal') and t.is_horizontal:
                 t_model = 'cube'  # UAV look (Boxy)
             else:
                 t_model = 'sphere' # Falling rock look
+                lbl_text = "METEOR"
             
             if tid not in self.threat_entities:
                 # Create new
                 self.threat_entities[tid] = Entity(model=t_model, color=t_color, scale=2.0, position=(tx, ty, tz))
+                
+                # Create Label
+                self.threat_labels[tid] = Text(
+                    text=lbl_text,
+                    parent=scene,
+                    position=(tx, ty + 3.0, tz),
+                    color=lbl_color,
+                    scale=2.0,
+                    billboard=True
+                )
             else:
-                # Update pos - Direct assignment, no animation lag
+                # Update pos
                 self.threat_entities[tid].position = (tx, ty, tz)
-                self.threat_entities[tid].color = t_color # Ensure color is correct
-                self.threat_entities[tid].rotation_y += 1 # Spin effect
+                self.threat_entities[tid].color = t_color
+                self.threat_entities[tid].rotation_y += 1
+                
+                # Update Label
+                if tid in self.threat_labels:
+                    self.threat_labels[tid].position = (tx, ty + 3.0, tz)
 
 
         # 3. Update Projectiles

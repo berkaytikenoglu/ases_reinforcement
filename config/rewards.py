@@ -11,7 +11,7 @@ class Rewards:
     ACCURACY_STREAK_BONUS = 200.0    
     ENGAGE_BONUS = 0.0              # Sıkmak marifet değil, vurmak marifet.
     AMMO_EFFICIENCY_BONUS = 500.0   # Mermi başına +500 (Tasarruf çok önemli)
-    GOOD_SHOT_BONUS = 500.0         # CESARET ÖDÜLÜ: Artırıldı (+300 -> +500) - Risk almayı teşvik!
+    GOOD_SHOT_BONUS = 1000.0        # CESARET ÖDÜLÜ: Hassas nişanda denemeyi teşvik (+500 -> +1000)
     DISTANCE_MULTIPLIER = 1.0       # İPTAL: 2.0 -> 1.0 (Kumarı önlemek için)
     
     # ===== HETEROJEN STRATEJİ ÖDÜLLER =====
@@ -46,9 +46,10 @@ class Rewards:
     TIME_STEP_PENALTY = -0.05       # Zaman cezası (hafif)
     
     # ===== IFF (IDENTIFICATION FRIEND OR FOE) =====
-    FRIENDLY_FIRE_PENALTY = -20000.0  # DOST ATEŞİ! (Çok ağır ceza - asla yapma!)
-    ENEMY_HIT_BONUS = 3000.0          # Düşman vurma bonusu (IFF doğru karar)
-    FRIENDLY_PASS_BONUS = 200.0       # Dostu vurmadan geçirme bonusu
+    FRIENDLY_FIRE_PENALTY = -20000.0  # CAYDIRICI GÜÇ: -10k -> -20k (Düşman vursan bile kurtarmaz)
+    ENEMY_HIT_BONUS = 10000.0         # DOĞRU VURUŞ: +10k
+    UAV_ESCAPE_PENALTY = -200.0       # İHA KAÇIRMA: Hafif Ceza
+    FRIENDLY_PASS_BONUS = 500.0       # Dostu vurmadan geçirme bonusu (Arttırıldı)
     
     # ===== GUIDANCE (Hassas Nişan) =====
     AIM_ANGLE_THRESHOLD = 0.15      # Radyan - Bonus için çok hassas nişan (0.25 -> 0.15)

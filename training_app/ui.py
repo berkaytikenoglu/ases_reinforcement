@@ -16,8 +16,11 @@ from config.parameters import Params
 class TrainingApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("ASES Training Control Panel")
-        self.root.geometry("750x850")
+        self.root.title("ASES - Autonomous Defense Training System")
+        self.root.geometry("800x900")
+        
+        # Apply Dark Theme
+        self.apply_dark_theme()
         
         self.is_training = False
         self.current_process = None # Track subprocess
@@ -42,6 +45,49 @@ class TrainingApp:
         self.load_params_from_class()
         
         self.create_widgets()
+    
+    def apply_dark_theme(self):
+        """Apply modern dark theme to the application"""
+        # Colors
+        self.bg_dark = "#1a1a2e"
+        self.bg_medium = "#16213e"
+        self.bg_light = "#0f3460"
+        self.accent = "#00d4ff"
+        self.accent_green = "#00ff88"
+        self.accent_red = "#ff4444"
+        self.text_primary = "#ffffff"
+        self.text_secondary = "#a0a0a0"
+        
+        self.root.configure(bg=self.bg_dark)
+        
+        # Configure ttk styles
+        style = ttk.Style()
+        style.theme_use('clam')
+        
+        # Frame styles
+        style.configure('TFrame', background=self.bg_dark)
+        style.configure('TLabelframe', background=self.bg_dark, foreground=self.accent)
+        style.configure('TLabelframe.Label', background=self.bg_dark, foreground=self.accent, font=('Segoe UI', 10, 'bold'))
+        
+        # Label styles
+        style.configure('TLabel', background=self.bg_dark, foreground=self.text_primary, font=('Segoe UI', 9))
+        style.configure('Header.TLabel', background=self.bg_dark, foreground=self.accent, font=('Segoe UI', 18, 'bold'))
+        style.configure('Subheader.TLabel', background=self.bg_dark, foreground=self.text_secondary, font=('Segoe UI', 10))
+        
+        # Button styles
+        style.configure('TButton', background=self.bg_light, foreground=self.text_primary, font=('Segoe UI', 10, 'bold'), padding=8)
+        style.map('TButton', background=[('active', self.accent)])
+        
+        style.configure('Accent.TButton', background=self.accent_green, foreground=self.bg_dark, font=('Segoe UI', 11, 'bold'), padding=10)
+        style.configure('Danger.TButton', background=self.accent_red, foreground=self.text_primary, font=('Segoe UI', 11, 'bold'), padding=10)
+        
+        # Entry/Combobox styles
+        style.configure('TEntry', fieldbackground=self.bg_medium, foreground=self.text_primary)
+        style.configure('TCombobox', fieldbackground=self.bg_medium, foreground=self.text_primary, selectbackground=self.accent)
+        
+        # Checkbutton/Radiobutton
+        style.configure('TCheckbutton', background=self.bg_dark, foreground=self.text_primary)
+        style.configure('TRadiobutton', background=self.bg_dark, foreground=self.text_primary)
         
     def load_params_from_class(self):
         # Extract editable parameters
@@ -70,7 +116,17 @@ class TrainingApp:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        ttk.Label(main_frame, text="Simulation Parameters", font=("Arial", 16, "bold")).pack(pady=10)
+        # Header Section
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        ttk.Label(header_frame, text="🛡️ ASES OTONOM SAVUNMA SİSTEMİ", style='Header.TLabel').pack()
+        ttk.Label(header_frame, text="Yapay Zeka Eğitim Kontrol Paneli", style='Subheader.TLabel').pack()
+        
+        # Separator
+        ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
+        
+        ttk.Label(main_frame, text="⚙️ Simülasyon Parametreleri", style='Header.TLabel', font=('Segoe UI', 12, 'bold')).pack(pady=5)
         
         self.entries = {}
         
@@ -156,7 +212,7 @@ class TrainingApp:
         phase_frame.pack(side=tk.LEFT, padx=5)
         ttk.Label(phase_frame, text="Phase:").pack(side=tk.LEFT)
         self.phase_var = tk.StringVar(value="Auto")
-        phase_combo = ttk.Combobox(phase_frame, textvariable=self.phase_var, values=["Auto", "Phase 1", "Phase 2", "Phase 3"], width=10, state="readonly")
+        phase_combo = ttk.Combobox(phase_frame, textvariable=self.phase_var, values=["Auto", "Phase 1 (Aim)", "Phase 2 (One Shot)", "Phase 3 (IFF)", "Phase 4 (War)"], width=16, state="readonly")
         phase_combo.pack(side=tk.LEFT, padx=2)
         
         self.test_btn = ttk.Button(action_frame, text="Test Agent", command=self.test_agent)
@@ -332,6 +388,7 @@ class Params:
                 if "Phase 1" in phase_sel: cmd.extend(["--phase", "1"])
                 elif "Phase 2" in phase_sel: cmd.extend(["--phase", "2"])
                 elif "Phase 3" in phase_sel: cmd.extend(["--phase", "3"])
+                elif "Phase 4" in phase_sel: cmd.extend(["--phase", "4"])
             else:
                 # Training mode - use global option
                 if self.use_3d_var.get():
@@ -372,7 +429,17 @@ class Params:
                 self.log(f"Auto-generated Agent Name: {model_name}")
 
             if model_name:
-                cmd.extend(["--model", model_name])
+                # Setup model arg - Handle both folder and file references
+                # If it's a folder model (standard), just pass the name
+                safe_model_name = model_name
+                if safe_model_name.endswith('.pth'):
+                    safe_model_name = safe_model_name.replace('.pth', '')
+                
+                cmd.extend(["--model", safe_model_name])
+                
+                # If testing, we want to LOAD from this model too
+                if mode == "test":
+                     cmd.extend(["--load-model", safe_model_name])
 
             
             try:
@@ -403,7 +470,7 @@ class Params:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+                creationflags=0
             ) 
             
             # Read output line by line
