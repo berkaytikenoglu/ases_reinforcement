@@ -140,7 +140,9 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
     # Start training visualizer (only for training mode, not test)
     visualizer = None
     if not test_mode:
-        visualizer = start_visualizer()
+        visualizer = start_visualizer(max_episodes=max_episodes)
+        if visualizer:
+            visualizer.set_phase(init_phase) # Sync starting phase with UI
     
     for i_episode in range(1, max_episodes+1):
         # Update Learning Rate
@@ -159,7 +161,7 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             time_step += 1
             
             # Select action (deterministic in test mode, stochastic in training)
-            action, action_logprob = agent.select_action(state)
+            action, action_logprob = agent.select_action(state, deterministic=test_mode)
             state_tensor = torch.FloatTensor(state)
             
             # Execute action
@@ -216,8 +218,6 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             dmg = info.get('agent_hits', 0)
             spawned = info.get('spawned', 0)
             ammo_left = info.get('ammo', 0)
-            ammo_used = Params.AMMO_CAPACITY - ammo_left
-            hit_rate = (hits / spawned * 100) if spawned > 0 else 0.0
             
             # Result Status
             reason = info.get('reason', '')
@@ -242,27 +242,54 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
             phase = env.curriculum_phase
             
             # Auto-Curriculum Promotion (EPISODE-BASED for reliable progression)
-            if phase == 1 and i_episode >= 100:
-                # Phase 1 complete after 100 episodes of aim training
+            # Auto-Curriculum Promotion (ENABLED - USER APPROVED: PHASE 2 READY)
+            if phase == 1 and i_episode >= Params.PHASE1_EPISODES:
+                # Phase 1 complete
                 env.curriculum_phase = 2
-                print(f"\n >>> PROMOTION! Entering Phase 2: ONE SHOT MODE (after 100 ep aim training) <<<\n")
+                print(f"\n >>> PROMOTION! Entering Phase 2: ONE SHOT MODE (after {Params.PHASE1_EPISODES} ep) <<<\n")
                 if renderer: renderer.set_phase_text("PHASE 2: ONE SHOT")
                 if visualizer: visualizer.set_phase(2, i_episode)
                 
-            elif phase == 2 and i_episode >= 600 and success_rate > 30.0:
-                # Phase 2 complete after 600 total episodes + 30% success
+                # SAVE PHASE 1 MODEL
+                if model_name:
+                    phase1_path = os.path.join(MODELS_DIR, model_name, f"{model_name}_phase1.pth")
+                    agent.save(phase1_path)
+                    print(f" >>> Phase 1 Model Saved: {os.path.basename(phase1_path)}")
+                
+            elif phase == 2 and i_episode >= Params.PHASE2_EPISODES and success_rate > 30.0:
+                # Phase 2 complete
                 env.curriculum_phase = 3
                 print(f"\n >>> PROMOTION! Entering Phase 3: FULL WARFARE <<<\n")
                 if renderer: renderer.set_phase_text("PHASE 3: FULL WARFARE")
                 if visualizer: visualizer.set_phase(3, i_episode)
+                
+                # SAVE PHASE 2 MODEL
+                if model_name:
+                    phase2_path = os.path.join(MODELS_DIR, model_name, f"{model_name}_phase2.pth")
+                    agent.save(phase2_path)
+                    print(f" >>> Phase 2 Model Saved: {os.path.basename(phase2_path)}")
 
             # Ammo check - Only for Phase > 1
             if phase > 1 and result != "SUCCESS" and ammo_left <= 0:
                 result += " (Ammo Issue)"
             
-            ammo_used = Params.AMMO_CAPACITY - ammo_left
-            ammo_used_pct = (ammo_used / Params.AMMO_CAPACITY) * 100
-            print(f"Ep {i_episode:4d} | P{phase} | R: {current_ep_reward:6.1f} | Avg: {avg_reward:6.1f} | Hits: {hits}/{spawned} | Used: {ammo_used}/{Params.AMMO_CAPACITY} ({ammo_used_pct:.0f}%) | {result}")
+            # Correct Ammo Calculation for Visualizer
+            # Use 'phase' (captured at line 250) NOT 'env.curriculum_phase' to avoid promotion-spike
+            # Correct Ammo Calculation
+            current_max_ammo = Params.AMMO_CAPACITY
+            if phase == 1:
+                current_max_ammo = 0 # No shooting in Phase 1
+            elif phase == 2:
+                current_max_ammo = Params.PHASE2_AMMO
+            elif phase == 3:
+                current_max_ammo = Params.PHASE3_AMMO
+                
+            ammo_used = info.get('shots', 0)
+            if current_max_ammo > 0:
+                ammo_used_pct = (ammo_used / current_max_ammo) * 100
+            else:
+                ammo_used_pct = 0
+            print(f"Ep {i_episode:4d} | P{phase} | R: {current_ep_reward:6.1f} | Avg: {avg_reward:6.1f} | Hits: {hits}/{spawned} | Used: {ammo_used}/{current_max_ammo} ({ammo_used_pct:.0f}%) | {result}")
             
             # Update training visualizer graphs
             if visualizer:
@@ -298,6 +325,12 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
         target = save_path if save_path else model_path
         agent.save(target)
         print(f"Final model saved to {target}")
+        
+        # SAVE COMPLETED MODEL
+        if model_name:
+            completed_path = os.path.join(MODELS_DIR, model_name, f"{model_name}_completed.pth")
+            agent.save(completed_path)
+            print(f" >>> Full Training Completed: {os.path.basename(completed_path)}")
     
     elapsed = time.time() - start_time
     print(f"\n{'='*50}")
@@ -329,7 +362,49 @@ if __name__ == '__main__':
     parser.add_argument('--list', action='store_true', help='List available models')
     parser.add_argument('--cpu', action='store_true', help='Force CPU mode (disable GPU)')
     parser.add_argument('--phase', type=int, default=None, help='Override starting phase (1-3) for testing')
+    
+    # Phase Duration Overrides
+    parser.add_argument('--p1-eps', type=int, default=None, help='Override Phase 1 Episodes')
+    parser.add_argument('--p2-eps', type=int, default=None, help='Override Phase 2 Episodes')
+    parser.add_argument('--p3-eps', type=int, default=None, help='Override Phase 3 Episodes')
+    
+    # Single Phase Training Mode
+    parser.add_argument('--only-phase', type=int, choices=[1, 2, 3], default=None, help='Train ONLY this phase for the entire duration')
+
     args = parser.parse_args()
+    
+    # Logic for --only-phase
+    if args.only_phase is not None:
+        print(f"DEBUG: ONLY PHASE {args.only_phase} MODE ACTIVATED")
+        # If we only want Phase 1, make Phase 1 last forever (or untill max_episodes)
+        if args.only_phase == 1:
+            Params.PHASE1_EPISODES = args.episodes
+            print(f"DEBUG: PHASE1_EPISODES set to {args.episodes} (Locking Phase 1)")
+            
+        # If we only want Phase 2, start at 2 and make it last forever
+        elif args.only_phase == 2:
+            args.phase = 2 # Force start at 2
+            Params.PHASE2_EPISODES = args.episodes
+            print(f"DEBUG: Starting at Phase 2 and setting PHASE2_EPISODES to {args.episodes}")
+            
+        # If we only want Phase 3, start at 3
+        elif args.only_phase == 3:
+            args.phase = 3 # Force start at 3
+            Params.PHASE3_EPISODES = args.episodes
+            print(f"DEBUG: Starting at Phase 3 (Locking Phase 3)")
+
+    # Apply Overrides to Params BEFORE Environment Init
+    if args.p1_eps is not None:
+        print(f"DEBUG: Overriding PHASE1_EPISODES to {args.p1_eps}")
+        Params.PHASE1_EPISODES = args.p1_eps
+        
+    if args.p2_eps is not None:
+        print(f"DEBUG: Overriding PHASE2_EPISODES to {args.p2_eps}")
+        Params.PHASE2_EPISODES = args.p2_eps
+        
+    if args.p3_eps is not None:
+        print(f"DEBUG: Overriding PHASE3_EPISODES to {args.p3_eps}")
+        Params.PHASE3_EPISODES = args.p3_eps
     
     # Set device globally before training
     if args.cpu:

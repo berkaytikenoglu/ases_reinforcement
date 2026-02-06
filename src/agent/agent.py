@@ -47,13 +47,19 @@ class ActorCritic(nn.Module):
         self.action_std = new_action_std
         self.action_var = torch.full((self.actor[-1].out_features,), new_action_std * new_action_std).to(self.actor[-1].weight.device)
 
-    def act(self, state):
+    def act(self, state, deterministic=False):
         action_mean = self.actor(state)
-        cov_mat = torch.diag(self.action_var).unsqueeze(dim=0).to(state.device)
-        dist = torch.distributions.MultivariateNormal(action_mean, cov_mat)
         
-        action = dist.sample()
-        action_logprob = dist.log_prob(action)
+        if deterministic:
+            # Test Mode: Use the mean directly (No noise)
+            action = action_mean
+            action_logprob = torch.zeros(1).to(action.device) # Dummy logprob
+        else:
+            # Training Mode: Sample from distribution (Exploration)
+            cov_mat = torch.diag(self.action_var).unsqueeze(dim=0).to(state.device)
+            dist = torch.distributions.MultivariateNormal(action_mean, cov_mat)
+            action = dist.sample()
+            action_logprob = dist.log_prob(action)
         
         return action.detach(), action_logprob.detach()
     
@@ -110,10 +116,10 @@ class Agent:
         self.policy.action_var = self.policy.action_var.to(self.device)
         self.policy_old.action_var = self.policy_old.action_var.to(self.device)
 
-    def select_action(self, state):
+    def select_action(self, state, deterministic=False):
         with torch.no_grad():
             state = torch.FloatTensor(state).to(self.device)
-            action, action_logprob = self.policy_old.act(state)
+            action, action_logprob = self.policy_old.act(state, deterministic=deterministic)
             
         return action.cpu().numpy().flatten(), action_logprob.cpu().numpy().flatten()
     

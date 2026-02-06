@@ -11,7 +11,8 @@ class Rewards:
     ACCURACY_STREAK_BONUS = 200.0    
     ENGAGE_BONUS = 0.0              # Sıkmak marifet değil, vurmak marifet.
     AMMO_EFFICIENCY_BONUS = 500.0   # Mermi başına +500 (Tasarruf çok önemli)
-    DISTANCE_MULTIPLIER = 2.0       # UZAK MESAFE ÇARPANI: Ne kadar uzak o kadar iyi! (User Request)
+    GOOD_SHOT_BONUS = 500.0         # CESARET ÖDÜLÜ: Artırıldı (+300 -> +500) - Risk almayı teşvik!
+    DISTANCE_MULTIPLIER = 1.0       # İPTAL: 2.0 -> 1.0 (Kumarı önlemek için)
     
     # ===== HETEROJEN STRATEJİ ÖDÜLLER =====
     AREA_DEFENSE_HIT_BONUS = 500.0      # Yüksek irtifa vuruş bonusu (DEVASA!)
@@ -25,7 +26,7 @@ class Rewards:
     # ===== NEGATİF CEZALAR (AĞIR!) =====
     # ===== DİNAMİK CEZALAR (ULTIMATE SCALE) =====
     # ===== DİNAMİK CEZALAR (MESAFEYE GÖRE) =====
-    MISS_PENALTY_LONG_RANGE = -500.0   # Uzaktan denemeyi çok cezalandırma (-2000 -> -500)
+    MISS_PENALTY_LONG_RANGE = -1000.0   # ARTTIRILDI: -500 -> -1000 (Uzaktan sallamak yok!)
     MISS_PENALTY_CLOSE_RANGE = -1000.0 
     
     
@@ -37,14 +38,15 @@ class Rewards:
     
     # EYLEM CEZALARI (Maliyetler)
     FIRE_PENALTY = -100.0           # Mermi maliyeti arttı! (-5 -> -100) - Tetiğe basmak pahalı.
-    WASTED_AMMO_PENALTY = -500.0    # Tehdit yokken ateş (Yasak!)
+    AMMO_DEPLETED_PENALTY = -10000.0 # Mermi bitti = FAIL (Büyük ceza)
+    WASTED_AMMO_PENALTY = -5000.0   # AĞIR CEZA: -500 -> -5000 (Boşa sıkmak YASAK!)
     COOLDOWN_VIOLATION = -50.0      # Cooldown'da ateş (Sabırsızlık cezası)
     RISKY_ANGLE_PENALTY = -20.0     # Tehlikeli açı
-    BAD_AIM_PENALTY = -2000.0       # KÖR ATIŞ YASAK! (-80 -> -2000) - Hedefi görmeden sıkmak intihardır.teş (AĞIR!)
+    BAD_AIM_PENALTY = -500.0        # CEZA HAFİFLETİLDİ (-2000 -> -500) - Denemekten korkma!
     TIME_STEP_PENALTY = -0.05       # Zaman cezası (hafif)
     
     # ===== GUIDANCE (Hassas Nişan) =====
     AIM_ANGLE_THRESHOLD = 0.15      # Radyan - Bonus için çok hassas nişan (0.25 -> 0.15)
-    BAD_AIM_THRESHOLD = 0.30        # Radyan - Ceza eşiği daraltıldı (0.50 -> 0.30)
+    BAD_AIM_THRESHOLD = 0.40        # TOLERANS GENİŞLETİLDİ (0.3 -> 0.4) - Biraz hata payı tanı.
     EARLY_ENGAGEMENT_DISTANCE = 600 # Piksel - kapsam genişletildi (450->600)
     LATE_ENGAGEMENT_DISTANCE = 200  # Piksel - geç angajman (yakın = ceza)

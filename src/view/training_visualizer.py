@@ -23,8 +23,9 @@ from config.parameters import Params
 from config.rewards import Rewards
 
 class TrainingVisualizer:
-    def __init__(self, max_history=500):
+    def __init__(self, max_history=500, max_episodes=1000):
         self.max_history = max_history
+        self.max_episodes = max_episodes
         
         # Data storage
         self.episodes = []
@@ -56,18 +57,18 @@ class TrainingVisualizer:
         self.phase_transitions = {}  # {episode: phase}
         
     def _build_timeline_text(self):
-        """Build a sleek horizontal phase progress bar"""
+        """Build a sleek horizontal phase progress bar (Simplified - No misleading ranges)"""
         def get_fmt(p, name):
             if self.current_phase == p:
                 return f"⬢ {name} (AKTİF)"
             if self.current_phase > p:
-                return f"✔ {name}"
+                return f"✔ {name} (GEÇİLDİ)"
             return f"⬡ {name}"
             
         parts = [
-            get_fmt(1, "NİŞAN (1-100)"),
-            get_fmt(2, "TEK ATIM (100-200)"),
-            get_fmt(3, "SAVAŞ (200+)")
+            get_fmt(1, "NİŞAN EĞİTİMİ"),
+            get_fmt(2, "SNIPER MODU"),
+            get_fmt(3, "TAM SAVAŞ")
         ]
         return "  ──  ".join(parts)
         
@@ -80,6 +81,9 @@ class TrainingVisualizer:
         self.fig, self.axes = plt.subplots(2, 3, figsize=(16, 10))
         self.fig.suptitle('ASES Training Metrics', fontsize=14, fontweight='bold')
         
+        # Reserve space for Header & Timeline
+        self.fig.subplots_adjust(top=0.85) # Push plots down to make room
+        
         # Style
         plt.style.use('dark_background')
         self.fig.patch.set_facecolor('#1a1a2e')
@@ -87,30 +91,11 @@ class TrainingVisualizer:
             ax.set_facecolor('#16213e')
             ax.grid(True, alpha=0.3, color='#4a4a6a')
         
-        # Row 1
-        self.axes[0, 0].set_title('Bölüm Ödülleri', color='#00d4ff')
-        
-        self.axes[0, 1].set_title('Başarı Oranı (50 Bölüm)', color='#00ff88')
-        self.axes[0, 1].set_ylim(0, 100)
-        
-        # Deaths (New)
-        self.axes[0, 2].set_title('Toplam Ölüm (Cumulative)', color='#ff0000')
-        self.axes[0, 2].set_xlabel('Bölüm')
-        self.axes[0, 2].set_ylabel('Ölüm Sayısı')
-        
-        # Row 2
-        self.axes[1, 0].set_title('İsabet / Tehdit', color='#ff6b6b')
-        
-        self.axes[1, 1].set_title('Mühimmat Kullanımı', color='#ffd93d')
-        
-        self.axes[1, 2].set_title('Hayatta Kalma Oranı (50 Bölüm)', color='#00ff00')
-        self.axes[1, 2].set_ylim(0, 100)
-        self.axes[1, 2].set_xlabel('Bölüm')
-        self.axes[1, 2].set_ylabel('%')
-        
+        # ... (titles row 1) ...
+
         # Phase Timeline (Sleek Top Bar)
         self.timeline_text = self.fig.text(
-            0.5, 0.94,  # Top Center
+            0.5, 0.91,  # Centered in the GAP (0.85 - 0.95)
             self._build_timeline_text(),
             transform=self.fig.transFigure,
             fontsize=9,
@@ -252,6 +237,14 @@ class TrainingVisualizer:
                     ax.relim()
                     ax.autoscale_view()
             
+            # --- CUSTOM AXIS FOR AMMO (Fixed scale based on Phase) ---
+            if self.current_phase == 1:
+                self.axes[1, 1].set_ylim(0, Params.AMMO_CAPACITY + 5)
+            elif self.current_phase == 2:
+                self.axes[1, 1].set_ylim(0, Params.PHASE2_AMMO + 5)
+            else:
+                self.axes[1, 1].set_ylim(0, Params.PHASE3_AMMO + 5)
+            
             # --- TEXT UPDATES ---
             # Remove old text objects
             if hasattr(self, 'stats_text') and self.stats_text:
@@ -262,25 +255,24 @@ class TrainingVisualizer:
                 latest_reward = self.rewards[-1]
                 latest_avg = self.avg_rewards[-1]
                 latest_success = self.success_rates[-1]
-                best_reward_so_far = max(self.rewards)
                 
                 # Phase Info with Status Indicators (USER REQUEST)
                 if self.current_phase == 1:
-                    phase_info = "FAZ 1: NİŞAN EĞİTİMİ | 🛡️ Ölümsüz=AÇIK | 🔫 Tetik=KİLİTLİ"
-                    condition = "Koşul: Avg > -1.5 & Ep > 50"
+                    phase_info = "FAZ 1: NİŞAN EĞİTİMİ"
                 elif self.current_phase == 2:
-                    phase_info = "FAZ 2: TEK MERMİ | 🛡️ Ölümsüz=KAPALI | 🔫 Tetik=TEK ATIM"
-                    condition = "Koşul: %80 Başarı & Ep > 100"
+                    phase_info = "FAZ 2: TEK MERMİ"
                 else:
-                    phase_info = "FAZ 3: TAM SAVAŞ | 🛡️ Ölümsüz=KAPALI | 🔫 Tetik=SERBEST"
-                    condition = "Final Modu"
+                    phase_info = "FAZ 3: TAM SAVAŞ"
                 
                 # Update Timeline Text
                 if hasattr(self, 'timeline_text'):
                     self.timeline_text.set_text(self._build_timeline_text())
-                stats_text = (f"Bölüm: {eps[-1]} | {phase_info}\n"
-                              f"Son: Ödül={latest_reward:.0f} | Ort={latest_avg:.0f} | Başarı={latest_success:.0f}% | {condition}")
-                self.fig.suptitle(f'ASES OTONOM SAVUNMA AJANI\n{stats_text}', fontsize=10, fontweight='bold', color='white')
+                
+                # CLEAN MINIMALIST HEADER (User Request)
+                header_text = (f"ASES OTONOM SAVUNMA AJANI | {phase_info}\n"
+                               f"Hedef: {self.max_episodes} Bölüm | İlerleme: {eps[-1]} ({eps[-1]/self.max_episodes*100:.1f}%) | Ort Ödül: {latest_avg:.0f}")
+                
+                self.fig.suptitle(header_text, fontsize=11, fontweight='bold', color='white')
 
             try:
                 # Use draw_idle for optimized redraw
@@ -313,14 +305,14 @@ class TrainingVisualizer:
 # Singleton instance for easy access
 _visualizer = None
 
-def get_visualizer():
+def get_visualizer(max_episodes=1000):
     global _visualizer
     if _visualizer is None:
-        _visualizer = TrainingVisualizer()
+        _visualizer = TrainingVisualizer(max_episodes=max_episodes)
     return _visualizer
 
-def start_visualizer():
-    viz = get_visualizer()
+def start_visualizer(max_episodes=1000):
+    viz = get_visualizer(max_episodes)
     viz.start()
     return viz
 
