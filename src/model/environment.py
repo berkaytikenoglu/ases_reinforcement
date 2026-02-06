@@ -404,6 +404,7 @@ class DefenseEnv(gym.Env):
         info['spawned'] = self.threats_spawned
         info['ammo'] = self.defense_system.ammo  # Remaining ammo
         info['shots'] = self.shots_fired         # Shots taken this episode
+        info['health'] = self.agent_health       # Current health status
     
         return self._get_obs(), reward, terminated, truncated, info
 

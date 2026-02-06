@@ -210,6 +210,7 @@ class TrainingVisualizer:
                 self.axes[1, 2].set_title('Hayatta Kalma Oranı (50 Bölüm)', color='#00ff00')
                 self.axes[1, 2].set_xlabel('Bölüm')
                 self.axes[1, 2].set_ylabel('%')
+                self.axes[1, 2].set_ylim(0, 105)
                 
             # --- UPDATE DATA ---
             self.lines['reward'].set_data(eps, self.rewards)
