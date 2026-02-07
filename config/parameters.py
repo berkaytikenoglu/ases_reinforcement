@@ -41,8 +41,8 @@ class Params:
 
     # Phase 3 (Curriculum): IFF Recognition (Friend or Foe)
     PHASE3_EPISODES = 10000          # Elite Standart: 10.000 Episode (IFF Uzmanlığı)
-    PHASE3_THREATS = 8               # Toplam hedef (dost + düşman karışık)
-    PHASE3_FRIENDLY_RATIO = 0.2      # %20 dost (Daha az karmaşa, daha kolay başlangıç)
+    PHASE3_THREATS = 5               # SPEED RUN: 8 -> 5 (Daha kısa maçlar, daha hızlı eğitim)
+    PHASE3_FRIENDLY_RATIO = 0.2      # 5 * 0.2 = 1 Dost (Tam kararında)
     PHASE3_HORIZONTAL_RATIO = 0.5    # %50 yatay uçuş
     PHASE3_AMMO = 60                 # USER STRATEGY: 40 -> 60 (Bol mermi ile rahat eğitim + Tasarruf Bonusu)
     PHASE3_HEALTH = 3                # 3 can (biraz tolerans)

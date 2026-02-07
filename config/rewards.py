@@ -46,10 +46,11 @@ class Rewards:
     TIME_STEP_PENALTY = -0.05       # Zaman cezası (hafif)
     
     # ===== IFF (IDENTIFICATION FRIEND OR FOE) =====
-    FRIENDLY_FIRE_PENALTY = -20000.0  # CAYDIRICI GÜÇ: -10k -> -20k (Düşman vursan bile kurtarmaz)
-    ENEMY_HIT_BONUS = 10000.0         # DOĞRU VURUŞ: +10k
+    # ===== IFF (IDENTIFICATION FRIEND OR FOE) =====
+    FRIENDLY_FIRE_PENALTY = -30000.0  # OPTİMİZE: -50k -> -30k (Korkuyu azalttık, öğrenmeyi hızlandırdık)
+    ENEMY_HIT_BONUS = 15000.0         # TEŞVİK: +10k -> +15k (Vurmak daha cazip)
     UAV_ESCAPE_PENALTY = -200.0       # İHA KAÇIRMA: Hafif Ceza
-    FRIENDLY_PASS_BONUS = 500.0       # Dostu vurmadan geçirme bonusu (Arttırıldı)
+    FRIENDLY_PASS_BONUS = 500.0       # Dostu vurmadan geçirme bonusu
     
     # ===== GUIDANCE (Hassas Nişan) =====
     AIM_ANGLE_THRESHOLD = 0.15      # Radyan - Bonus için çok hassas nişan (0.25 -> 0.15)
