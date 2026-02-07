@@ -335,6 +335,8 @@ def train(render=True, render_3d=False, max_episodes=1000, model_name=None, test
                 current_max_ammo = Params.PHASE2_AMMO
             elif phase == 3:
                 current_max_ammo = Params.PHASE3_AMMO
+            elif phase >= 4:
+                current_max_ammo = Params.PHASE4_AMMO
                 
             ammo_used = info.get('shots', 0)
             if current_max_ammo > 0:

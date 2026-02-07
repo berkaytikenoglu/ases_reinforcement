@@ -47,7 +47,7 @@ class Rewards:
     
     # ===== IFF (IDENTIFICATION FRIEND OR FOE) =====
     # ===== IFF (IDENTIFICATION FRIEND OR FOE) =====
-    FRIENDLY_FIRE_PENALTY = -30000.0  # OPTİMİZE: -50k -> -30k (Korkuyu azalttık, öğrenmeyi hızlandırdık)
+    FRIENDLY_FIRE_PENALTY = -300000.0 # OPTİMİZE: -30k -> -300k (KESİN YASAK - USER REQUEST)
     ENEMY_HIT_BONUS = 15000.0         # TEŞVİK: +10k -> +15k (Vurmak daha cazip)
     UAV_ESCAPE_PENALTY = -200.0       # İHA KAÇIRMA: Hafif Ceza
     FRIENDLY_PASS_BONUS = 500.0       # Dostu vurmadan geçirme bonusu

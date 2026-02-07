@@ -53,9 +53,11 @@ class Params:
     PHASE3_UAV_SPEED_MAX = 40.0      # Yakalanabilir hız (60 -> 40)
     
     # Phase 4 (Curriculum): War Mode (Intense Combat)
-    PHASE4_THREATS = 15              # Yoğun savaş: 15 hedef
-    PHASE4_AMMO = 60                 # Bol mermi (Updated from 40)
-    PHASE4_HEALTH = 3                # 3 can
+    PHASE4_THREATS = 5               # ULTRA HIZ: 7 -> 5 (En basit Savaş Modu)
+    PHASE4_AMMO = 100                 # Bol mermi
+    PHASE4_HEALTH = 2                # USER REQUEST: 2 Can (Hardcore Survival)
+    PHASE4_FRIENDLY_RATIO = 0.1      # USER REQUEST: az dost (%10)
+    PHASE4_HORIZONTAL_RATIO = 0.3    # USER REQUEST: Daha az İHA (0.6 -> 0.3)
 
     
     # Episode Kuralları
@@ -68,9 +70,9 @@ class Params:
     MAX_WIND_FORCE = 0.5
     
     # Eğitim / RL (PPO Hyperparameters) - PRECISION TUNING (STABLE > AGGRESSIVE)
-    LEARNING_RATE = 0.0003           # STABİLİZE: 0.0005 çok hızlı saçmalayabiliyor, 0.0003 ideal.
+    LEARNING_RATE = 0.0003           # USER REQUEST: 0.0008 -> 0.0003 (Daha stabil, daha az hata)
     MAX_EPISODES = 5000              
-    GAMMA = 0.99
+    GAMMA = 0.99                     # USER REQUEST: 0.95 -> 0.99 (Uzun vadeli planlama)
     
     # Advanced PPO
     LAMBDA = 0.95
@@ -83,5 +85,5 @@ class Params:
     
     # BATCH & ROLLOUT
     ROLLOUT_STEPS = 2048
-    MINIBATCH_SIZE = 64
-    PPO_EPOCHS = 10
+    MINIBATCH_SIZE = 128          # GPU DOSTU: 64 -> 128 (Daha stabil gradient)
+    PPO_EPOCHS = 4                # HIZLI UPDATE: 10 -> 4 (Daha az işlem, daha çok oyun)

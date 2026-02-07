@@ -100,6 +100,10 @@ class DefenseEnv(gym.Env):
             self.agent_health = Params.AGENT_HEALTH # Immortal logic handled in step()
         elif self.curriculum_phase == 2:
             self.agent_health = Params.PHASE2_HEALTH
+        elif self.curriculum_phase == 3:
+            self.agent_health = Params.PHASE3_HEALTH
+        elif self.curriculum_phase >= 4:
+            self.agent_health = Params.PHASE4_HEALTH
         else:
             self.agent_health = Params.AGENT_HEALTH
             
@@ -155,6 +159,7 @@ class DefenseEnv(gym.Env):
         current_max_ammo = Params.AMMO_CAPACITY
         if self.curriculum_phase == 2: current_max_ammo = Params.PHASE2_AMMO
         elif self.curriculum_phase == 3: current_max_ammo = Params.PHASE3_AMMO
+        elif self.curriculum_phase >= 4: current_max_ammo = Params.PHASE4_AMMO
         obs[9] = self.defense_system.ammo / current_max_ammo
         
         # 10: Threat Density
@@ -338,7 +343,7 @@ class DefenseEnv(gym.Env):
         hits = self._check_collisions()
         self.threats_destroyed += hits
         
-        if hits > 0:
+        if hits > 0 or (hasattr(self, 'last_engagement_reward') and self.last_engagement_reward != 0):
             if self.curriculum_phase == 1:
                 pass # No shooting, no hits possible
             elif self.curriculum_phase == 2:
@@ -347,7 +352,16 @@ class DefenseEnv(gym.Env):
                 # terminated = True 
                 info['result'] = 'Hit' # Status update
             else:
-                reward += Rewards.HIT_REWARD * hits
+                # CRITICAL FIX: Use the calculated engagement reward (includes Penalties & Strategy Bonuses)
+                # Old: reward += Rewards.HIT_REWARD * hits (IGNORED FRIENDLY FIRE PENALTY!)
+                if hasattr(self, 'last_engagement_reward'):
+                    reward += self.last_engagement_reward
+                    
+            # CRITICAL: Immediate Fail on Friendly Fire (Phase 4 ONLY)
+            if self.curriculum_phase >= 4 and getattr(self, 'friendly_fire_count', 0) > 0:
+                 terminated = True
+                 info['result'] = 'FAILED'
+                 info['reason'] = 'friendly_fire_fail'
         
         # Misses (Ground Hits & Escapes)
         ground_misses, uav_escapes = self._check_threats_reached_base()
@@ -617,6 +631,7 @@ class DefenseEnv(gym.Env):
                         # === IFF CHECK (Phase 3+) ===
                         if hasattr(t, 'is_friendly') and t.is_friendly:
                             # FRIENDLY FIRE! Heavy penalty
+                            print(f"DEBUG: FRIENDLY FIRE! Penalty: {Rewards.FRIENDLY_FIRE_PENALTY}")
                             engagement_reward += Rewards.FRIENDLY_FIRE_PENALTY
                             friendly_hits += 1
                         else:
